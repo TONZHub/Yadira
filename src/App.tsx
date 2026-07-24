@@ -44,7 +44,7 @@ import { useStoreList, useStoreDoc } from './lib/useStore';
 import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
-import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum } from './components';
+import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal } from './components';
 import type { FamilyPackApply } from './components';
 import type { RoomId } from './lib/sensoryRooms';
 import { AuthProvider, useAuth } from './lib/AuthContext';
@@ -329,6 +329,7 @@ function AppContent() {
     setProfile({ ...profile, companionPersonality: v });
   const setYadiraVoice = (v: 'female' | 'male') => setProfile({ ...profile, yadiraVoice: v });
   const setRepresentedVoiceId = (v: string) => setProfile({ ...profile, representedVoiceId: v });
+  const [showCloneVoice, setShowCloneVoice] = useState(false);
   const setDriftTimeoutSeconds = (v: number) => setProfile({ ...profile, driftTimeoutSeconds: v });
   const setDriftEnabled = (v: boolean) => setProfile({ ...profile, driftEnabled: v });
 
@@ -3372,8 +3373,7 @@ function AppContent() {
                               if (val !== 'custom') {
                                 setRepresentedVoiceId(val);
                               } else {
-                                const customId = prompt("Enter Inworld Custom Voice ID:", representedVoiceId) || representedVoiceId;
-                                setRepresentedVoiceId(customId);
+                                setShowCloneVoice(true);
                               }
                             }}
                             className="w-full p-2 bg-white border border-[#C4C09E] rounded-xl text-xs font-bold text-[#2C2C2A] focus:ring-1 focus:ring-[#3A5D45]"
@@ -3384,6 +3384,16 @@ function AppContent() {
                             <option value="custom">Custom Inworld Voice ID...</option>
                           </select>
 
+                          {/* Clone-a-voice helper — always available, so a caregiver can
+                              learn how to make a loved one's voice before ever picking custom. */}
+                          <button
+                            type="button"
+                            onClick={() => setShowCloneVoice(true)}
+                            className="mt-1.5 text-[10px] font-bold text-[#3A5D45] hover:underline"
+                          >
+                            ✨ Clone a loved one's voice — how?
+                          </button>
+
                           {!['Sarah', 'Ashley', 'Dennis'].includes(representedVoiceId) && (
                             <div className="mt-1.5 flex items-center space-x-1">
                               <span className="text-[9px] font-mono bg-rose-50 text-rose-700 px-2 py-0.5 rounded border border-rose-100 font-bold block truncate max-w-full">
@@ -3391,10 +3401,7 @@ function AppContent() {
                               </span>
                               <button
                                 type="button"
-                                onClick={() => {
-                                  const customId = prompt("Enter Inworld Custom Voice ID:", representedVoiceId) || representedVoiceId;
-                                  setRepresentedVoiceId(customId);
-                                }}
+                                onClick={() => setShowCloneVoice(true)}
                                 className="text-[9px] text-[#3A5D45] hover:underline font-bold"
                               >
                                 Edit
@@ -4228,6 +4235,14 @@ function AppContent() {
               {/* Add Memory Modal Dialog */}
               {showFamilySetup && (
                 <FamilySetup onClose={() => setShowFamilySetup(false)} onApply={applyFamilyPack} />
+              )}
+
+              {showCloneVoice && (
+                <CloneVoiceModal
+                  currentValue={representedVoiceId}
+                  onClose={() => setShowCloneVoice(false)}
+                  onSave={setRepresentedVoiceId}
+                />
               )}
 
               {showMemModal && (
