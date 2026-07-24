@@ -504,7 +504,7 @@ function AppContent() {
   // Real Stripe checkout flips `unlocked` (after server-side verification of
   // the paid session); the demo toggle remains as a fallback only when
   // STRIPE_SECRET_KEY isn't configured on the server.
-  const [premium, setPremium] = useStoreDoc<{
+  const [premium, setPremium, premiumSynced] = useStoreDoc<{
     unlocked: boolean;
     subscriptionId?: string;
     customerId?: string;
@@ -583,6 +583,40 @@ function AppContent() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPatientSession]);
+
+  // Restore purchase: premium is stored per care circle (keyed by uid), so a
+  // caregiver who recreates their account or switches sign-in provider lands
+  // in a fresh circle and loses what they paid for. Once the circle's premium
+  // doc has synced and still says locked, ask the server whether this
+  // account's EMAIL has an active subscription — and re-unlock if so.
+  const restoreAttemptedRef = useRef(false);
+  useEffect(() => {
+    if (isPatientSession || premium.unlocked || restoreAttemptedRef.current) return;
+    if (isFirebaseConfigured && !premiumSynced) return; // wait for the cloud doc before assuming locked
+    restoreAttemptedRef.current = true;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/stripe/restore?circle=${encodeURIComponent(getCircleId())}`, {
+          headers: authHeaders(),
+        });
+        if (!res.ok) return; // unconfigured/no-email/hiccup — nothing to restore
+        const data = await res.json();
+        if (data.found && data.active) {
+          setPremium({
+            unlocked: true,
+            subscriptionId: data.subscriptionId || undefined,
+            customerId: data.customerId || undefined,
+            currentPeriodEnd: data.currentPeriodEnd || undefined,
+          });
+          toastSuccess('Caregiver Pro restored', 'Welcome back — your subscription followed you to this sign-in.');
+        }
+      } catch {
+        // Best-effort: the Unlock button still works, and we retry next visit.
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPatientSession, premium.unlocked, premiumSynced]);
 
   // Renewal / lapse check: once the paid-through date (plus a 3-day retry
   // grace window) has passed, re-verify the subscription with Stripe and

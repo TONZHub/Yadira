@@ -192,6 +192,54 @@ export function registerStripeRoutes(app: express.Express) {
     }
   });
 
+  // Restore purchase — find an active subscription by the AUTHENTICATED
+  // account's email, independent of care-circle id. The premium doc lives in
+  // careCircles/{uid}, so a caregiver who recreates their account or switches
+  // sign-in provider gets a new uid and an empty circle — without this, a
+  // paying family is silently locked out of what they paid for. The email
+  // comes from the auth token, never the request body, so the endpoint can't
+  // be used to probe other people's subscriptions by address.
+  app.get('/api/stripe/restore', async (req: express.Request, res: express.Response) => {
+    if (!isStripeConfigured()) return notConfigured(res);
+
+    const email = String((req as any).user?.email || '').trim().toLowerCase();
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'The signed-in account has no email address' });
+    }
+
+    try {
+      const customers = await stripeRequest('GET', '/customers', { email, limit: '10' });
+      let best: any = null;
+      for (const customer of customers?.data || []) {
+        const subs = await stripeRequest('GET', '/subscriptions', {
+          customer: customer.id,
+          status: 'all',
+          limit: '10',
+        });
+        for (const sub of subs?.data || []) {
+          const state = subscriptionState(sub);
+          if (!state.active) continue;
+          if (!best || (sub.created || 0) > (best.created || 0)) best = sub;
+        }
+      }
+      if (!best) return res.json({ found: false });
+
+      // Re-point the subscription's metadata at the circle claiming it, so
+      // the Stripe dashboard reflects where this family actually lives now.
+      const circle = String(req.query?.circle || '').slice(0, 128);
+      if (circle) {
+        stripeRequest('POST', `/subscriptions/${best.id}`, {
+          'metadata[circleId]': circle,
+        }).catch(() => {});
+      }
+
+      res.json({ found: true, ...subscriptionState(best) });
+    } catch (err: any) {
+      console.error('[Stripe] restore failed:', err.message || err);
+      res.status(502).json({ error: err.message || 'Failed to restore subscription' });
+    }
+  });
+
   // Self-serve billing management (cancel, update card) via Stripe's hosted
   // customer portal — families must always have an easy way out.
   app.post('/api/stripe/create-portal-session', async (req: express.Request, res: express.Response) => {
