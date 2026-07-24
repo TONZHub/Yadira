@@ -102,6 +102,11 @@ export function registerStripeRoutes(app: express.Express) {
 
     const circle = String(req.body?.circle || 'default-circle').slice(0, 128);
     const base = baseUrl(req);
+    // Lock the checkout to the signed-in account's email. Restore-by-email
+    // (below) can only find a subscription whose Stripe customer email
+    // matches the login email — letting people type a different address at
+    // checkout is how a paying caregiver gets orphaned from their purchase.
+    const accountEmail = String((req as any).user?.email || '').trim().toLowerCase();
 
     // Pinned rather than left to the dashboard's dynamic payment-method
     // config: an account whose dashboard methods are unset/misconfigured
@@ -126,6 +131,9 @@ export function registerStripeRoutes(app: express.Express) {
       'metadata[circleId]': circle,
       'subscription_data[metadata][circleId]': circle,
       allow_promotion_codes: 'true',
+      ...(accountEmail && accountEmail.includes('@') && !accountEmail.endsWith('@yadira.local')
+        ? { customer_email: accountEmail }
+        : {}),
     };
 
     try {
