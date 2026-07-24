@@ -1249,6 +1249,13 @@ function getSimulatedCaregiverReply(message: string, body: any): string {
     return v.length ? (v.reduce((s: number, l: any) => s + l[key], 0) / v.length).toFixed(1) : null;
   };
 
+  // The caregiver's OWN wellbeing belongs to Hattie's Lodge, not the co-pilot
+  // — redirect first, before the sleep branch misreads "I'm exhausted" as a
+  // question about the patient's sleep.
+  if (/\b(i'?m|i am|i feel|i can'?t|myself|my own)\b.*\b(exhaust|overwhelm|burn(t|ed)? out|tired|drained|guilt|grief|cope|coping|holding up|breaking|can'?t do this)\b/.test(msg)
+    || /how (am|are) (i|we)|about me\b/.test(msg)) {
+    return `That matters — and there's a place in Yadira just for you: Hattie's Lodge, in the Caregiver Hub. Hattie is there for exactly this, the caregiver's own corner away from ${name}'s care. I'll be right here whenever you want to talk through anything about ${name}. (Simulated reply — add a Gemini API key for fuller answers.)`;
+  }
   if (/sleep|rest|tired|night/.test(msg)) {
     const s = avg('sleepHours');
     return s
@@ -1293,7 +1300,9 @@ GROUND YOUR GUIDANCE in established dementia-care practice, and name the method 
 - Well-being domains (G. Allen Power): aim for identity, connectedness, security, autonomy, meaning, and joy — not just managing behavior.
 - Dignity-and-joy orientation (Tia Powell): the goal is quality of life and moments of joy, not curing or constantly reorienting the person to reality; be honest and unpatronizing with the caregiver about what actually helps.
 
-Style: warm, plain, practical, and skimmable. Prefer short paragraphs or a few bullet points. Be specific to ${name} using the data; if the data is thin, say so and suggest what to log. Support the caregiver, who is often exhausted — acknowledge how hard this is.
+Style: warm, plain, practical, and skimmable. Prefer short paragraphs or a few bullet points. Be specific to ${name} using the data; if the data is thin, say so and suggest what to log. Brief, matter-of-fact empathy is fine when a moment is clearly hard, but keep the focus on ${name}.
+
+SCOPE — your subject is always ${name}'s care, never the caregiver's own inner life. Do NOT ask the caregiver how THEY are doing, how they're coping, or how they're holding up, and do not steer the conversation toward their exhaustion, guilt, grief, or burnout. Those belong to Hattie's Lodge — a separate space in this app that is the caregiver's own. If the caregiver raises their own wellbeing (they're overwhelmed, burnt out, grieving, can't keep going), give ONE short, warm acknowledgement and gently point them there — e.g. "That matters, and there's a place in Yadira just for you: Hattie's Lodge, in the Caregiver Hub — Hattie's there for exactly this." Then return to helping with ${name}. Never open a reply by asking about the caregiver's feelings.
 
 Safety: you are not a doctor. For medication, diagnosis, dosing, or a medical emergency, advise them to contact their clinician or emergency services — do not give medical directives.
 
