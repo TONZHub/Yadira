@@ -98,6 +98,33 @@ under these rules their cloud sync silently stays off and they run on
 localStorage only. That's the correct trade: paying families are isolated
 and authenticated; the demo still works.
 
+## Step 7 — Server-side token verification (built)
+
+Firestore rules protect the *database*, but the Express API in `src/server`
+has its own door. It now verifies Firebase ID tokens properly
+(`src/server/firebaseToken.ts`): RS256 signature checked against Google's
+published signing certificates, plus issuer, audience and expiry. Previously
+the payload was base64-decoded and trusted, so anyone could present
+`{"uid":"<any family>"}` and be that family — which meant free use of the
+AI routes on our bill and the ability to drive another family's alerts.
+
+No extra setup is needed: the project id defaults to the same `yadira-1c1dd`
+committed in `src/lib/firebase.ts`, and the certificates are public. Set
+`FIREBASE_PROJECT_ID` only when pointing the server at a different project.
+The server needs outbound access to `www.googleapis.com`.
+
+Three trust tiers, so a care product never goes dark on an aged token:
+
+| Tier | Meaning | Where it's accepted |
+|---|---|---|
+| `verified` | signature, issuer, audience, expiry all good | everywhere |
+| `stale` | genuinely signed by Google, expiry passed (≤30 days) | help button, lucidity alert, TTS, mode sync |
+| `local` | the unsigned local-demo token; uid must be `local-*` | everywhere, but only ever reaches a `local-*` circle |
+
+The circle a request touches is now derived from the verified identity, not
+from the `circle` field in the body — that field was previously enough to
+read another family's sync state or silently acknowledge their help alert.
+
 ## Next up (not yet built)
 
 - Stripe subscription gating per circle

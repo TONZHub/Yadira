@@ -320,7 +320,7 @@ function AppContent() {
     // browser tabs/devices (which don't share localStorage) stay in sync too.
     fetch('/api/shared-mode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ mode: v, circle: getCircleId() }),
     }).catch((err) => console.warn('[Yadira] shared-mode push failed', err));
   };
@@ -476,7 +476,7 @@ function AppContent() {
     const settle = () => { if (!cancelled) setModeReady(true); };
     const poll = async () => {
       try {
-        const res = await fetch(`/api/shared-mode?circle=${encodeURIComponent(getCircleId())}`);
+        const res = await fetch(`/api/shared-mode?circle=${encodeURIComponent(getCircleId())}`, { headers: authHeaders() });
         if (res.ok) {
           const data = await res.json();
           if (!cancelled) applySharedMode(data?.mode);
@@ -816,7 +816,7 @@ function AppContent() {
     // Cross-device sync via backend
     fetch('/api/aurora-mode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ active, circle: getCircleId() }),
     }).catch((err) => console.warn('[Yadira] aurora push failed', err));
   };
@@ -849,7 +849,7 @@ function AppContent() {
     let cancelled = false;
     const poll = async () => {
       try {
-        const res = await fetch(`/api/aurora-mode?circle=${encodeURIComponent(getCircleId())}`);
+        const res = await fetch(`/api/aurora-mode?circle=${encodeURIComponent(getCircleId())}`, { headers: authHeaders() });
         if (!res.ok || cancelled) return;
         const data = await res.json();
         if (typeof data?.active === 'boolean') setAuroraActiveState(data.active);
@@ -883,7 +883,7 @@ function AppContent() {
     localStorage.setItem('yadira_caregiver_alert', JSON.stringify(state));
     fetch('/api/caregiver-alert', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ active, circle: getCircleId() }),
     }).catch((err) => console.warn('[Yadira] caregiver-alert push failed', err));
   };
@@ -900,7 +900,7 @@ function AppContent() {
     localStorage.setItem('yadira_lucidity_alert', JSON.stringify(state));
     fetch('/api/lucidity-alert', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ active, circle: getCircleId() }),
     }).catch((err) => console.warn('[Yadira] lucidity-alert push failed', err));
   };
@@ -926,8 +926,8 @@ function AppContent() {
       const circle = encodeURIComponent(getCircleId());
       try {
         const [helpRes, lucidRes] = await Promise.all([
-          fetch(`/api/caregiver-alert?circle=${circle}`),
-          fetch(`/api/lucidity-alert?circle=${circle}`),
+          fetch(`/api/caregiver-alert?circle=${circle}`, { headers: authHeaders() }),
+          fetch(`/api/lucidity-alert?circle=${circle}`, { headers: authHeaders() }),
         ]);
         if (cancelled) return;
         if (helpRes.ok) {
@@ -1402,7 +1402,7 @@ function AppContent() {
     localStorage.setItem('yadira_shared_mode', JSON.stringify({ mode: p.patientMode, at: Date.now() }));
     fetch('/api/shared-mode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ mode: p.patientMode, circle: getCircleId() }),
     }).catch(() => {});
 

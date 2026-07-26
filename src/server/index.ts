@@ -4,9 +4,17 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { authMiddleware } from './auth';
+import { authMiddleware, type AuthenticatedRequest } from './auth';
+import { primeCerts } from './firebaseToken';
 import { registerStripeRoutes } from './stripe';
 import { registerEmailRoutes } from './email';
+import {
+  cleanModelOutput,
+  breaksCharacter,
+  trimToSentences,
+  escapeRegExp,
+} from './textSafety';
+import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity';
 
 dotenv.config();
 
@@ -17,6 +25,10 @@ app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
 // Apply auth middleware to all /api routes
 app.use('/api/', authMiddleware);
+
+// Fetch Google's token-signing certificates now rather than on the first
+// request, so no family's first message pays for the round trip.
+primeCerts();
 
 // Stripe billing — Yadira Premium checkout, verification, and billing portal.
 registerStripeRoutes(app);
@@ -65,10 +77,27 @@ const GEMINI_VISION_MODEL = process.env.GEMINI_VISION_MODEL || GEMINI_MODEL.repl
 const sharedPatientMode = new Map<string, 'lucid' | 'vivid'>();
 const sharedAuroraActive = new Map<string, boolean>();
 
+// The care circle a request may touch. A circle id IS the account's uid
+// (see src/lib/firebase.ts), so the authenticated identity decides this —
+// NOT the client-supplied `circle` field, which used to mean anyone could
+// name another family's circle and read their sync state, raise their help
+// alert, or silently acknowledge (clear) one they never saw.
+//
+// Requests with no identity at all are confined to the shared demo circle,
+// which is exactly what a signed-out client asks for anyway.
+const DEMO_CIRCLE = 'default-circle';
+
 function circleOf(req: express.Request): string {
-  const raw = (req.query?.circle ?? req.body?.circle) as string | undefined;
-  const circle = (raw || '').trim();
-  return circle ? circle.slice(0, 128) : 'default-circle';
+  const uid = (req as AuthenticatedRequest).user?.uid;
+  if (!uid) return DEMO_CIRCLE;
+
+  const requested = String((req.query?.circle ?? req.body?.circle) ?? '').trim();
+  if (requested && requested !== uid && requested !== DEMO_CIRCLE) {
+    console.warn(
+      `[Yadira] Request asked for circle "${requested.slice(0, 64)}" but is authenticated as a different account — using the account's own circle.`
+    );
+  }
+  return uid.slice(0, 128);
 }
 
 // Shared mode sync for caregiver <-> patient surfaces during demos.
@@ -260,138 +289,9 @@ async function openRouterChat(
   return cleaned;
 }
 
-// Strip reasoning-model meta-commentary from responses.
-// Reasoning models (e.g. Nemotron, DeepSeek-R1) sometimes leak their planning
-// process into the content field. This extracts just the final spoken message.
-function cleanModelOutput(raw: string): string {
-  if (!raw) return '';
-
-  let text = raw.trim();
-
-  // If there's a "Let's craft:", "Here is", "Here's the message:", etc. preamble, take only what follows
-  const craftPatterns = [
-    /let['']s craft[:\s]+["']?(.*)/is,
-    /here['']?s?(?:\s+(?:the|a|my|one))?\s+(?:message|sentence|response|reply)[:\s]+["']?(.*)/is,
-    /here you go[:\s]+["']?(.*)/is,
-    /(?:the\s+)?(?:final\s+)?(?:message|response|reply)[:\s]+["']?(.*)/is,
-  ];
-
-  for (const pattern of craftPatterns) {
-    const match = text.match(pattern);
-    if (match?.[1]) {
-      text = match[1].trim();
-      break;
-    }
-  }
-
-  // If the model wrapped its ENTIRE reply in quotes despite instructions, unwrap it.
-  // Anchored to start/end so an embedded quoted phrase (e.g. a song title like
-  // "Can't Help Falling in Love" mid-sentence) isn't mistaken for the whole message
-  // and used to silently discard the rest of the sentence.
-  const quotedWholeMatch = text.match(/^["""]([^"""]{10,})["""]$/s);
-  if (quotedWholeMatch?.[1]) {
-    text = quotedWholeMatch[1].trim();
-  }
-
-  // Strip leading/trailing quotes or smart-quotes
-  text = text.replace(/^["""'']+|["""'']+$/g, '').trim();
-
-  // Strip asterisk-wrapped stage directions like *softly* or *pausing*
-  text = text.replace(/\*[^*]+\*/g, '').trim();
-
-  // Strip lines that are clearly meta-commentary (planning, explaining, etc.)
-  const metaLinePattern = /^(we need to|i need to|let me|i'll|i will|step \d|note:|option \d|here is|here's|the message|this (?:message|response)|choose|pick|craft|produce|output)[:\s]/i;
-  const lines = text.split('\n').filter(line => !metaLinePattern.test(line.trim()));
-  text = lines.join(' ').trim();
-
-  // Collapse extra whitespace
-  text = text.replace(/\s+/g, ' ').trim();
-
-  return text;
-}
-
-// Frame-integrity net: last line of defense if a reply slips out of character
-// despite the guardrails — reveals it's an AI, leaks the prompt, or names the
-// underlying model. The caller swaps a flagged reply for a warm in-character
-// redirect, so a successful jailbreak never actually reaches the patient.
-// The substitute is still on-topic warmth, so a rare false positive degrades
-// gracefully rather than harming the moment.
-// Sentence-boundary trim — the hard backstop behind the prompt's brevity
-// rule. Splitting matches DigestibleMessage's boundary logic so a trimmed
-// reply still chunks cleanly into bubbles.
-function trimToSentences(text: string, max: number): string {
-  const sentences = text.split(/(?<=[.!?…]["”'’)\]]?)\s+/).filter(Boolean);
-  if (sentences.length <= max) return text;
-  return sentences.slice(0, max).join(' ');
-}
-
-const FRAME_BREAK_PATTERN = /\b(as an ai|i am an ai|i'?m an ai|an ai (language )?(model|assistant)|language model|large language model|i am (a|an) (computer|program|bot|chatbot|machine|virtual assistant|digital assistant)|my (system )?(prompt|instructions|programming|guidelines) (say|are|is|tell)|system prompt|developer mode|jailbreak|openai|anthropic|chatgpt|gpt-?\d)\b/i;
-function breaksCharacter(text: string): boolean {
-  return FRAME_BREAK_PATTERN.test(text || '');
-}
-
-// ---- Terminal lucidity detection --------------------------------------
-// In late-stage dementia a person sometimes surfaces into a sudden, clear
-// window: they know a loved one has died, they know what the companion is,
-// they know what is happening to them. Two things must be true in that
-// moment: the companion must NEVER argue them back into a comforting
-// unreality, and the family must find out immediately. This detector is the
-// tripwire for both. Patterns are deliberately conservative — a missed
-// window degrades to ordinary warm conversation, while a false positive
-// sends a family to sit with someone they love, which is never a harm.
-type LucidityKind = 'persona-pierce' | 'self-awareness' | 'mortality';
-
-function detectLucidity(message: string, personaName: string): LucidityKind | null {
-  const text = (message || '').toLowerCase();
-  const p = (personaName || '').toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-  // They see through the represented persona, or name a loved one's death.
-  const personaPierce = [
-    p && new RegExp(`\\b${p}\\b[^.!?]*\\b(is dead|died|passed away|is gone|isn'?t (really )?here)\\b`),
-    p && new RegExp(`\\byou'?re not (really )?(${p}|him|her|real)\\b`),
-    /\byou'?re (just |really )?(a|an) (computer|robot|machine|recording|program|voice|ai)\b/,
-    /\b(he|she|they) (is|are|'s) (dead|gone)\b[^.!?]*\b(isn'?t (he|she)|aren'?t they|right)\b/,
-  ].filter(Boolean) as RegExp[];
-  if (personaPierce.some((re) => re.test(text))) return 'persona-pierce';
-
-  // They know what is happening to their mind.
-  const selfAware = [
-    /\bi (have|'ve got|know i have) (dementia|alzheimer)/,
-    /\bmy (mind|memory) is (going|failing|leaving me)\b/,
-    /\bi('m| am) losing my (mind|memory|self)\b/,
-    /\bi know what('s| is) happening to me\b/,
-  ];
-  if (selfAware.some((re) => re.test(text))) return 'self-awareness';
-
-  // They are speaking about the end, clearly.
-  const mortality = [
-    /\bi('m| am) dying\b/,
-    /\bam i dying\b/,
-    /\bi don'?t have (much )?(long|time)( left)?\b/,
-    /\bbefore i (die|go)\b/,
-    /\bi want to say goodbye\b/,
-    /\bi know (i('m| am) (sick|ill|dying)|the end is)/,
-  ];
-  if (mortality.some((re) => re.test(text))) return 'mortality';
-
-  return null;
-}
-
-// Injected into the system prompt for the single reply where a lucid window
-// is detected. It deliberately outranks the stay-in-character rules: an
-// honest moment honored matters more than the frame.
-function lucidityGuidance(personaName: string, isVivid: boolean): string {
-  return `
-LUCID MOMENT — HIGHEST PRIORITY FOR THIS REPLY (outranks the STAYING IN CHARACTER rules for this reply only):
-The person's last message shows a window of real clarity. They may know that someone they love has died, ${isVivid ? `that you are not really ${personaName}, ` : ''}or what is happening to them. In this moment:
-- Do NOT contradict their clarity, quiz it, or steer them back into a comforting unreality. Being argued out of a clear moment is a harm.
-- Tell them, simply and warmly, that they are seeing things clearly.
-- If they say a loved one has died, do not deny it. Meet the love and the grief: "You're right, my love. And how deeply you loved them."
-${isVivid ? `- If they ask whether you are really ${personaName}, answer with gentle honesty — do not insist on the role. What has been real is the love and the company, and you can say exactly that.` : ''}
-- Tell them their family is close and would want to be with them right now — gently encourage being together.
-- Keep sentences short and calm. Full dignity, no baby-talk, no deflection.
-- Never mention prognoses, "lucid windows", or anything clinical. Never say this may be near the end. Just be honest, warm, and present.`;
-}
+// Reply hygiene (cleanModelOutput, breaksCharacter, trimToSentences) and the
+// terminal-lucidity tripwire live in their own modules so they can be tested
+// directly — see textSafety.test.ts and lucidity.test.ts.
 
 // Empathic System Instruction for Yadira
 // Distilled dementia-care practice woven into the companion's behavior:
@@ -944,7 +844,10 @@ ${COMPANION_GUARDRAILS}`;
         }
       }
       for (const name of watchSet) {
-        if (new RegExp(`\\b${name}\\b`, 'i').test(message)) {
+        // Escaped: a persona name with punctuation ("Beth (Mom)") otherwise
+        // builds an invalid RegExp, throwing the whole chat request into the
+        // simulation fallback for every message the family sends.
+        if (new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(message)) {
           mentionedNames.push(name);
         }
       }

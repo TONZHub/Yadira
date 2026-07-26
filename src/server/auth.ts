@@ -1,55 +1,83 @@
 import { Request, Response, NextFunction } from 'express';
+import { verifyFirebaseToken, type TokenTier } from './firebaseToken';
 
 export interface AuthenticatedRequest extends Request {
   user?: { uid: string; email?: string };
+  /** How much the identity above can be trusted — see firebaseToken.ts. */
+  authTier?: TokenTier;
   token?: string;
 }
 
 /**
- * Middleware to verify Firebase JWT token.
- * Extracts token from Authorization header and attaches user to request.
- * If Firebase is not configured, allows requests through (for local development).
+ * Paths that must keep working on a token that has aged out.
+ *
+ * The reasoning behind the original exemption still holds: a family missing a
+ * brief lucid window, or a patient's help button failing, because a token
+ * expired would be unforgivable. What changed is *how* that resilience is
+ * bought. These paths no longer skip authentication altogether — they accept
+ * a token whose signature still checks out but whose expiry has passed
+ * ('stale'), and they accept having no token at all (an anonymous demo
+ * session, which circleOf() then confines to the shared demo circle).
+ *
+ * What they no longer accept is a forged token naming somebody else's
+ * circle — which is what let a stranger clear a family's help alert.
  */
-export const authMiddleware = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
-  try {
-    // Keep key demo paths resilient even if one browser tab temporarily loses auth state.
-    // Mounted under /api, so req.path values are like "/shared-mode" and "/tts".
-    // /aurora-mode carries only a boolean and is polled without auth headers by
-    // both surfaces — without this exemption its cross-device sync silently 401s.
-    // /caregiver-alert is the patient's help button — it must NEVER fail on a
-    // stale token. Boolean + timestamp only, same risk profile as aurora-mode.
-    // /lucidity-alert has the identical risk profile — and a family missing a
-    // brief lucid window because of an expired token would be unforgivable.
-    if (req.path === '/shared-mode' || req.path === '/tts' || req.path === '/aurora-mode' || req.path === '/caregiver-alert' || req.path === '/lucidity-alert') {
-      return next();
-    }
+const STALE_TOKEN_OK = new Set([
+  '/shared-mode',
+  '/tts',
+  '/aurora-mode',
+  '/caregiver-alert',
+  '/lucidity-alert',
+]);
 
-    // Extract token from Authorization header
+/** These same paths stay reachable with no Authorization header at all. */
+const ANONYMOUS_OK = STALE_TOKEN_OK;
+
+/**
+ * Verify the caller's Firebase ID token and attach the identity to the
+ * request. Mounted under /api, so req.path values look like "/chat".
+ */
+export const authMiddleware = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const resilient = STALE_TOKEN_OK.has(req.path);
     const authHeader = req.headers.authorization;
+
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      if (ANONYMOUS_OK.has(req.path)) return next(); // demo circle only
       console.warn('[Yadira Auth] Missing or invalid Authorization header');
       return res.status(401).json({ error: 'Unauthorized: missing token' });
     }
 
-    const token = authHeader.substring(7); // Remove "Bearer " prefix
+    const token = authHeader.substring(7);
+    const verified = await verifyFirebaseToken(token);
 
-    try {
-      // Decode JWT manually (simple approach without firebase-admin)
-      // In production, use firebase-admin for server-side verification
-      const decoded = decodeJWT(token);
-      const resolvedUid = decoded?.uid || decoded?.user_id || decoded?.sub;
-      if (!decoded || !resolvedUid) {
-        console.warn('[Yadira Auth] Invalid token structure');
-        return res.status(401).json({ error: 'Unauthorized: invalid token' });
-      }
-
-      req.user = { uid: resolvedUid, email: decoded.email };
-      req.token = token;
-      next();
-    } catch (err: any) {
-      console.warn('[Yadira Auth] Token verification failed:', err.message);
+    if (!verified) {
+      if (ANONYMOUS_OK.has(req.path)) return next(); // fall through as anonymous
+      console.warn('[Yadira Auth] Token failed verification');
       return res.status(401).json({ error: 'Unauthorized: invalid token' });
     }
+
+    // An expired-but-genuine token gets the help button through, and nothing
+    // else — everywhere else the client refreshes and retries.
+    if (verified.tier === 'stale' && !resilient) {
+      return res.status(401).json({ error: 'Unauthorized: token expired' });
+    }
+
+    // Signatures aren't currently enforceable (never reached Google's certs).
+    // Confine such requests to the resilience paths rather than letting an
+    // unverifiable identity spend money on the AI routes.
+    if (verified.tier === 'unverified' && !resilient) {
+      return res.status(503).json({ error: 'Authentication temporarily unavailable' });
+    }
+
+    req.user = { uid: verified.uid, email: verified.email };
+    req.authTier = verified.tier;
+    req.token = token;
+    next();
   } catch (err: any) {
     console.error('[Yadira Auth] Middleware error:', err);
     return res.status(500).json({ error: 'Authentication error' });
@@ -57,39 +85,26 @@ export const authMiddleware = async (req: AuthenticatedRequest, res: Response, n
 };
 
 /**
- * Simple JWT decoder (parses without verification).
- * In production, use firebase-admin for full verification.
- */
-function decodeJWT(token: string): any {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-
-    // Decode payload (second part)
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
-/**
  * Optional middleware for routes that don't require auth.
- * Attempts to extract user info if token present, doesn't fail if missing.
+ * Attaches user info when a token verifies, never fails the request.
  */
-export const optionalAuthMiddleware = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+export const optionalAuthMiddleware = async (
+  req: AuthenticatedRequest,
+  _res: Response,
+  next: NextFunction
+) => {
   try {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
       const token = authHeader.substring(7);
-      const decoded = decodeJWT(token);
-      const resolvedUid = decoded?.uid || decoded?.user_id || decoded?.sub;
-      if (decoded && resolvedUid) {
-        req.user = { uid: resolvedUid, email: decoded.email };
+      const verified = await verifyFirebaseToken(token);
+      if (verified) {
+        req.user = { uid: verified.uid, email: verified.email };
+        req.authTier = verified.tier;
         req.token = token;
       }
     }
-  } catch (err) {
+  } catch {
     // Silently ignore auth errors for optional middleware
   }
   next();
