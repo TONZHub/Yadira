@@ -36,7 +36,7 @@ http
         console.log('[fake CALL-E] POST /v1/calls');
         console.log('  auth:', req.headers.authorization);
         console.log('  idempotency-key:', req.headers['idempotency-key']);
-        console.log('  to:', body.recipients?.[0]?.phones?.[0]);
+        console.log('  recipient:', JSON.stringify(body.recipients?.[0]));
         console.log('  schema fields:', Object.keys(body.recipient_result_schema?.properties || {}).join(', '));
         console.log('  task starts:', String(body.task).split('\n')[0].slice(0, 80));
         res.writeHead(200, { 'Content-Type': 'application/json' });

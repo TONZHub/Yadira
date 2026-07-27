@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import { createCall, getCall, isTerminal, hasApiKey } from './calleApi';
+import { localeFor, isSupportedRegion } from './calleRegions';
 import { summariseApiCall, placeCheckInCall, RECIPIENT_RESULT_SCHEMA, type CheckInCallRequest } from './checkInCall';
 
 const req: CheckInCallRequest = {
@@ -246,5 +247,36 @@ describe('summariseApiCall — vendor result and our own checks combined', () =>
     const out = summariseApiCall(await getCall('c'), req);
     assert.equal(out.phone, '+1555***4567');
     assert.doesNotMatch(JSON.stringify(out), /\+15551234567/);
+  });
+});
+
+describe('the call locale — why the first live call sounded English', () => {
+  test('a chosen region supplies the locale', () => {
+    assert.equal(localeFor('US'), 'en-US');
+    assert.equal(localeFor('AU'), 'en-AU');
+    assert.equal(localeFor('us'), 'en-US');
+  });
+
+  test('an explicit locale wins over the region default', () => {
+    assert.equal(localeFor('IN', 'hi-IN'), 'hi-IN');
+  });
+
+  test('no region and no locale returns undefined rather than a guess', () => {
+    // CALL-E is left on its own default. Inventing "en-US" here would be the
+    // same class of mistake as inferring a country from a dialling code.
+    assert.equal(localeFor(undefined, undefined), undefined);
+    assert.equal(localeFor('', ''), undefined);
+  });
+
+  test('an unsupported region does not fabricate a locale', () => {
+    assert.equal(localeFor('ZZ'), undefined);
+    assert.equal(isSupportedRegion('ZZ'), false);
+    assert.equal(isSupportedRegion('GB'), true);
+  });
+
+  test('the locale reaches CALL-E on the request', async () => {
+    await createCall({ task: 't', phone: '+15551234567', region: 'US', locale: localeFor('US') });
+    assert.equal(lastPost?.body.recipients[0].region, 'US');
+    assert.equal(lastPost?.body.recipients[0].locale, 'en-US');
   });
 });

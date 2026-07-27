@@ -44,6 +44,7 @@ import { useStoreList, useStoreDoc } from './lib/useStore';
 import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
+import { CALLE_REGIONS } from './server/calleRegions';
 import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal } from './components';
 import type { FamilyPackApply } from './components';
 import type { RoomId } from './lib/sensoryRooms';
@@ -418,6 +419,9 @@ function AppContent() {
   // without hunting for it.
   const [checkInCall, setCheckInCall] = useStoreDoc<{
     phone?: string;
+    /** CALL-E calling region. Chosen, never inferred — it decides how the
+        call sounds, and CALL-E's own default is not the family's accent. */
+    region?: string;
     lastSummary?: string;
     lastAt?: number;
     lastNeededCaregiver?: boolean;
@@ -444,6 +448,9 @@ function AppContent() {
           // Never inferred server-side: the patient's own timezone decides
           // whether it is a reasonable hour to ring them.
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+          // Decides the voice's accent. Sending nothing leaves CALL-E on its
+          // own default, which is how a US family got an English voice.
+          region: checkInCall.region || undefined,
         }),
       });
       const data = await res.json();
@@ -3384,6 +3391,22 @@ function AppContent() {
                       placeholder="+15551234567"
                       className="mt-2.5 w-full text-sm px-3 py-2 rounded-xl border border-[#E3DFC2] bg-white focus:outline-none focus:ring-2 focus:ring-[#3A5D45]/20"
                     />
+                    <label className="sr-only" htmlFor="check-in-region">
+                      Where they are — sets the voice's accent
+                    </label>
+                    <select
+                      id="check-in-region"
+                      value={checkInCall.region || ''}
+                      onChange={(e) => setCheckInCall({ ...checkInCall, region: e.target.value })}
+                      className="mt-2 w-full text-sm px-3 py-2 rounded-xl border border-[#E3DFC2] bg-white focus:outline-none focus:ring-2 focus:ring-[#3A5D45]/20"
+                    >
+                      <option value="">Where are they? (sets the accent)</option>
+                      {CALLE_REGIONS.map((r) => (
+                        <option key={r.code} value={r.code}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       type="button"
                       id="btn-check-in-call"
