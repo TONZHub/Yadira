@@ -417,66 +417,20 @@ function AppContent() {
   // lives in the care circle so both caregiver devices see the same one; the
   // last readout is kept so the caregiver can see how the last call went
   // without hunting for it.
-  const [checkInCall, setCheckInCall] = useStoreDoc<{
-    phone?: string;
-    /** The CAREGIVER's own number — rung when the help button is pressed.
-        Deliberately separate from `phone` above, which is the patient's:
-        dialling the wrong one would mean telling a frightened person that a
-        frightened person needs help. */
+  // ---- Help-button call (CALL-E) ----
+  // The caregiver's own number, rung the moment the patient asks for help.
+  // A banner is easy to miss; a ringing phone is not.
+  const [helpCall, setHelpCall] = useStoreDoc<{
+    /** The CAREGIVER's number. There is deliberately nowhere here to put the
+        patient's: Yadira does not phone the patient. */
     escalationPhone?: string;
-    /** CALL-E calling region. Chosen, never inferred — it decides how the
-        call sounds, and CALL-E's own default is not the family's accent. */
+    /** CALL-E calling region — chosen, never inferred. Decides which line the
+        call comes from. */
     region?: string;
-    lastSummary?: string;
-    lastAt?: number;
-    lastNeededCaregiver?: boolean;
+    // Storage key kept as 'checkInCall' from when this card also placed
+    // patient calls — renaming it would silently drop a number a caregiver
+    // has already saved.
   }>('checkInCall', {});
-  const [callingNow, setCallingNow] = useState(false);
-
-  const placeCheckInCall = async () => {
-    const phone = (checkInCall.phone || '').trim();
-    if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
-      toastError('Check the number', 'Use the full international form, e.g. +15551234567.');
-      return;
-    }
-    setCallingNow(true);
-    try {
-      const res = await fetch('/api/calls/check-in', {
-        method: 'POST',
-        headers: authHeaders(),
-        body: JSON.stringify({
-          toPhone: phone,
-          patientName: profile.patientName,
-          caregiverName: profile.caregiverName,
-          threadToPickUp: personaFile.threadToPickUp || undefined,
-          memoryHints: memories.slice(0, 3).map((m) => `${m.title} — ${m.description}`),
-          // Never inferred server-side: the patient's own timezone decides
-          // whether it is a reasonable hour to ring them.
-          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          // Decides the voice's accent. Sending nothing leaves CALL-E on its
-          // own default, which is how a US family got an English voice.
-          region: checkInCall.region || undefined,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
-      setCheckInCall({
-        ...checkInCall,
-        lastSummary: data.summary,
-        lastAt: Date.now(),
-        lastNeededCaregiver: !!data.needsCaregiver,
-      });
-      if (data.needsCaregiver) {
-        toastError('That call needs you', data.summary);
-      } else {
-        toastSuccess(data.dryRun ? 'Dry run complete' : 'Call finished', data.summary);
-      }
-    } catch (err: any) {
-      toastError('The call could not be placed', err?.message || 'Please try again.');
-    } finally {
-      setCallingNow(false);
-    }
-  };
   const personaFileRef = useRef(personaFile);
   personaFileRef.current = personaFile;
 
@@ -957,10 +911,10 @@ function AppContent() {
         // Rings the caregiver as well as raising the banner. Sent from here so
         // the server needs no stored state of its own; when it is absent the
         // alert behaves exactly as it always has.
-        escalationPhone: checkInCall.escalationPhone || undefined,
+        escalationPhone: helpCall.escalationPhone || undefined,
         patientName: profile.patientName,
         caregiverName: profile.caregiverName,
-        region: checkInCall.region || undefined,
+        region: helpCall.region || undefined,
       }),
     }).catch((err) => console.warn('[Yadira] caregiver-alert push failed', err));
   };
@@ -3360,85 +3314,56 @@ function AppContent() {
                     </div>
                   </button>
 
-                  {/* Check-in call — Yadira rings the patient's own phone.
-                      For the many people who cannot work a tablet but will
-                      still answer a telephone. One call per press; nothing
-                      recurring is created here. */}
-                  <div className="p-4 rounded-2xl border border-[#CEDFCF] bg-[#F2FAF4] flex flex-col">
+                  {/* Help-button call — the patient presses "I need my
+                      caregiver" and this number rings. Yadira does NOT phone
+                      the patient: CALL-E speaks in its own voice, and a
+                      familiar name in an unfamiliar voice is not the same
+                      person to someone whose recognition is failing. A
+                      caregiver knows exactly what the call is, so here it
+                      costs nothing and gains everything. */}
+                  <div className="p-4 rounded-2xl border border-rose-200 bg-rose-50/40 flex flex-col">
                     <span className="text-xs font-extrabold uppercase tracking-wider text-[#2C2C2A] flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5 text-[#3A5D45]" /> Check-in call
+                      <Phone className="w-3.5 h-3.5 text-rose-500" /> Call me when they need me
                     </span>
                     <span className="text-[10px] text-[#5E5D57] leading-tight mt-1 block">
-                      Yadira phones {profile.patientName || 'them'} for a short, warm hello and tells you how they
-                      sounded. She gives no medical advice, and anything worrying reaches you straight away.
+                      When {profile.patientName || 'they'} press the help button, Yadira raises the alert here{' '}
+                      <i>and</i> rings your phone straight away. A banner is easy to miss; a ringing phone is not.
                     </span>
-                    <label className="sr-only" htmlFor="check-in-phone">
-                      Phone number to call, in full international form
-                    </label>
-                    <input
-                      id="check-in-phone"
-                      type="tel"
-                      inputMode="tel"
-                      value={checkInCall.phone || ''}
-                      onChange={(e) => setCheckInCall({ ...checkInCall, phone: e.target.value })}
-                      placeholder="+15551234567"
-                      className="mt-2.5 w-full text-sm px-3 py-2 rounded-xl border border-[#E3DFC2] bg-white focus:outline-none focus:ring-2 focus:ring-[#3A5D45]/20"
-                    />
                     <label className="sr-only" htmlFor="help-call-phone">
-                      Your own phone number, rung when they press the help button
+                      Your own phone number, in full international form
                     </label>
                     <input
                       id="help-call-phone"
                       type="tel"
                       inputMode="tel"
-                      value={checkInCall.escalationPhone || ''}
-                      onChange={(e) => setCheckInCall({ ...checkInCall, escalationPhone: e.target.value })}
-                      placeholder="Your number, for the help button"
-                      className="mt-2 w-full text-sm px-3 py-2 rounded-xl border border-rose-200 bg-rose-50/40 focus:outline-none focus:ring-2 focus:ring-rose-300/40"
+                      value={helpCall.escalationPhone || ''}
+                      onChange={(e) => setHelpCall({ ...helpCall, escalationPhone: e.target.value })}
+                      placeholder="+15551234567"
+                      className="mt-2.5 w-full text-sm px-3 py-2 rounded-xl border border-rose-200 bg-white focus:outline-none focus:ring-2 focus:ring-rose-300/40"
                     />
-                    <span className="text-[10px] text-[#5E5D57] leading-tight mt-1 block">
-                      <b>Yours, not theirs.</b> When {profile.patientName || 'they'} press the help button, Yadira
-                      raises the alert here <i>and</i> rings this number straight away — a banner is easy to miss, a
-                      ringing phone is not.
+                    <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
+                      <b>Your number, not theirs.</b> Full international form, e.g. +15551234567.
                     </span>
                     <label className="sr-only" htmlFor="check-in-region">
-                      Where they are — sets the voice's accent
+                      Where you are — sets which line the call comes from
                     </label>
                     <select
                       id="check-in-region"
-                      value={checkInCall.region || ''}
-                      onChange={(e) => setCheckInCall({ ...checkInCall, region: e.target.value })}
-                      className="mt-2 w-full text-sm px-3 py-2 rounded-xl border border-[#E3DFC2] bg-white focus:outline-none focus:ring-2 focus:ring-[#3A5D45]/20"
+                      value={helpCall.region || ''}
+                      onChange={(e) => setHelpCall({ ...helpCall, region: e.target.value })}
+                      className="mt-2 w-full text-sm px-3 py-2 rounded-xl border border-rose-200 bg-white focus:outline-none focus:ring-2 focus:ring-rose-300/40"
                     >
-                      <option value="">Where are they? (sets the accent)</option>
+                      <option value="">Where are you? (sets the calling line)</option>
                       {CALLE_REGIONS.map((r) => (
                         <option key={r.code} value={r.code}>
                           {r.label}
                         </option>
                       ))}
                     </select>
-                    <button
-                      type="button"
-                      id="btn-check-in-call"
-                      onClick={placeCheckInCall}
-                      disabled={callingNow}
-                      className="mt-2 w-full flex items-center justify-center gap-2 text-sm font-bold px-3 py-2.5 rounded-xl bg-[#3A5D45] text-white disabled:opacity-60 hover:bg-[#2F4C39] transition-colors"
-                    >
-                      {callingNow ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Phone className="w-4 h-4" />}
-                      {callingNow ? 'Calling…' : 'Call now'}
-                    </button>
-                    {checkInCall.lastSummary && (
-                      <div
-                        className={`mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border ${
-                          checkInCall.lastNeededCaregiver
-                            ? 'border-rose-200 bg-rose-50 text-rose-800'
-                            : 'border-[#E3DFC2] bg-white text-[#5E5D57]'
-                        }`}
-                      >
-                        <b className="block mb-0.5">Last call</b>
-                        {checkInCall.lastSummary}
-                      </div>
-                    )}
+                    <span className="text-[10px] text-[#7E7D76] leading-tight mt-2 block">
+                      The call says only that {profile.patientName || 'they'} asked for you, and when. It never
+                      discusses their health, and repeated presses will not ring you over and over.
+                    </span>
                   </div>
 
                   {/* Caregiver Pro — the whole companion is free; only the
