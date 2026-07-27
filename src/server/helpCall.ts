@@ -42,20 +42,35 @@ export interface HelpCallResult {
 }
 
 /**
- * What the caregiver hears. Short on purpose: somebody answering a phone at
- * 3am needs one fact and one instruction, not a briefing.
+ * What the caregiver hears.
+ *
+ * Identity first, message second. This ordering is the whole design and it
+ * costs about a second: the call names a vulnerable person and says they have
+ * asked for help, and a phone number will eventually be answered by a
+ * neighbour, a child, a colleague, or a stranger with a recycled number. Ask
+ * who is there BEFORE saying any of it, and if it is not them, say nothing at
+ * all and hang up. A wrong number should learn only that somebody called.
+ *
+ * Short on purpose after that: somebody answering a phone at 3am needs one
+ * fact and one instruction, not a briefing.
  */
 export function buildHelpCallGoal(req: HelpCallRequest): string {
-  const when = new Date(req.at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-  const who = req.caregiverName ? `${req.caregiverName}, ` : '';
+  const caregiver = req.caregiverName || 'the caregiver';
   return [
-    `Call ${req.caregiverName || 'the caregiver'} with an urgent but calm message. Say it in the first sentence — do not build up to it.`,
-    `The message: "${who}this is Yadira. ${req.patientName} pressed the help button at ${when} and is asking for you."`,
+    `Call ${caregiver}. Before you say anything about why you are calling, confirm you are speaking to the right person.`,
+    '',
+    'Follow these steps in order:',
+    `1. Open with exactly this: "Hello, this is Yadira. Am I speaking with ${caregiver}?"`,
+    `2. If they say no, or they are evasive, or you are not certain it is ${caregiver}: say only "Sorry to have troubled you. Goodbye," and end the call. Do NOT say why you are calling. Do NOT name anyone. Do NOT ask them to pass on a message. A wrong number learns only that somebody called.`,
+    `3. Once they confirm they are ${caregiver}, say: "${req.patientName} has pressed the help button and is asking for you. Please go to them when you can."`,
+    `4. Then ask, gently and once: "Are you able to get to them?" Ask it as a question, not an instruction. Do not press for a commitment, do not repeat it, and do not tell them what to do — they may have been asleep, and they know their own situation better than you do.`,
+    '5. Thank them warmly and end the call.',
+    '',
+    'Throughout:',
+    'Sound like a person passing on a message, not a system issuing an order. Warm, unhurried, ordinary.',
     'Speak clearly and calmly. Do not sound alarmed — panic does not help anyone get there faster.',
-    'Say nothing further about their health, their condition, or anything they said. You do not know why they pressed it, and you must not speculate.',
-    'Ask the person to confirm they have heard and are going to them.',
-    'If it goes to voicemail, leave the same short message and say the app also has an alert waiting.',
-    'If someone other than the caregiver answers, give the same message only if they say they are with the family; otherwise ask them to pass on that the caregiver should check the Yadira app.',
+    'Say nothing about their health, their condition, or anything they said. You do not know why they pressed it, and you must not speculate.',
+    `If the call reaches voicemail, do not name ${req.patientName} and do not say why you are calling — a voicemail can be played aloud to a room. Leave only: "This is Yadira calling for ${caregiver}. There is an alert waiting in your Yadira app. Please check it now."`,
     'Keep the whole call under a minute.',
   ].join('\n');
 }
