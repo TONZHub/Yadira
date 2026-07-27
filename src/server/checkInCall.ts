@@ -399,12 +399,29 @@ export async function placeCheckInCall(req: CheckInCallRequest): Promise<CheckIn
     return summariseApiCall(result, req);
   }
 
-  const { status } = await placeOneCall({
-    toPhone: req.toPhone,
-    goal,
-    timezone: req.timezone,
-    language: req.language,
-    region: req.region,
-  });
-  return summariseCall(status, req);
+  try {
+    const { status } = await placeOneCall({
+      toPhone: req.toPhone,
+      goal,
+      timezone: req.timezone,
+      language: req.language,
+      region: req.region,
+    });
+    return summariseCall(status, req);
+  } catch (err: any) {
+    // With two transports, "run calle auth login" is misleading guidance when
+    // the real answer is usually "set CALLE_API_KEY". Name the easier route
+    // first, and say plainly that neither is configured — otherwise someone
+    // who HAS set a key goes hunting through the CLI for a problem that is
+    // actually the key not reaching this process.
+    const message = String(err?.message || err);
+    if (/not authorized|could not be found/i.test(message)) {
+      throw new Error(
+        `CALL-E is not configured. Set CALLE_API_KEY (the Developer API key — no browser login, works on a deployed server), ` +
+          `or sign the CLI in on this machine with "calle auth login". Neither is present right now. ` +
+          `Underlying detail: ${message}`
+      );
+    }
+    throw err;
+  }
 }

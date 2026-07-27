@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import http from 'http';
 import type { AddressInfo } from 'net';
 import { createCall, getCall, isTerminal, hasApiKey } from './calleApi';
-import { summariseApiCall, RECIPIENT_RESULT_SCHEMA, type CheckInCallRequest } from './checkInCall';
+import { summariseApiCall, placeCheckInCall, RECIPIENT_RESULT_SCHEMA, type CheckInCallRequest } from './checkInCall';
 
 const req: CheckInCallRequest = {
   toPhone: '+15551234567',
@@ -139,6 +139,34 @@ describe('reading the documented response shape', () => {
     assert.equal(result.status, 'queued');
     assert.equal(result.recipientResult, null);
     assert.deepEqual(result.turns, []);
+  });
+});
+
+describe('when nothing is configured, the error names the easier route first', () => {
+  test('mentions CALLE_API_KEY before the CLI login', async () => {
+    const savedKey = process.env.CALLE_API_KEY;
+    const savedDry = process.env.CALLE_DRY_RUN;
+    const savedCmd = process.env.CALLE_CLI_COMMAND;
+    delete process.env.CALLE_API_KEY;
+    delete process.env.CALLE_DRY_RUN;
+    // Force the CLI route to fail as it would with no binary and no login.
+    process.env.CALLE_CLI_COMMAND = '/nonexistent/calle';
+
+    let message = '';
+    try {
+      await placeCheckInCall({ toPhone: '+15551234567', patientName: 'Eleanor', timezone: 'America/New_York' });
+    } catch (err: any) {
+      message = String(err?.message || err);
+    } finally {
+      if (savedKey === undefined) delete process.env.CALLE_API_KEY; else process.env.CALLE_API_KEY = savedKey;
+      if (savedDry === undefined) delete process.env.CALLE_DRY_RUN; else process.env.CALLE_DRY_RUN = savedDry;
+      if (savedCmd === undefined) delete process.env.CALLE_CLI_COMMAND; else process.env.CALLE_CLI_COMMAND = savedCmd;
+    }
+
+    assert.match(message, /CALLE_API_KEY/);
+    assert.match(message, /calle auth login/);
+    // The key must be offered before the browser-login route.
+    assert.ok(message.indexOf('CALLE_API_KEY') < message.indexOf('calle auth login'));
   });
 });
 
