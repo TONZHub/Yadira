@@ -70,8 +70,17 @@ describe('what the caregiver hears', () => {
     assert.match(goal, /Say nothing about their health/i);
   });
 
-  test('asks for confirmation that they heard', () => {
-    assert.match(goal, /confirm they have heard you/i);
+  test('asks whether they can go — a question, not an order', () => {
+    // "Confirm you are going to her" read as an instruction being issued to
+    // someone who had just been woken up. It is their family member; they know
+    // their own situation.
+    assert.match(goal, /Are you able to get to them\?/);
+    assert.match(goal, /as a question, not an instruction/i);
+    assert.match(goal, /do not tell them what to do/i);
+  });
+
+  test('is told to sound like a person, not a system', () => {
+    assert.match(goal, /not a system issuing an order/i);
   });
 
   test('tells the caller not to sound alarmed', () => {

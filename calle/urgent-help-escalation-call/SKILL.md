@@ -92,8 +92,9 @@ design, not a nicety:
 ```
 "Hello, this is <product>. Am I speaking with <recipient>?"
    ├─ no / unsure → "Sorry to have troubled you. Goodbye."  → hang up, say nothing
-   └─ yes         → "<subject> has pressed their help button and is asking for
-                     you. Please go to them when you can."  → confirm → hang up
+   └─ yes         → "<subject> has pressed the help button and is asking for
+                     you. Please go to them when you can."
+                  → "Are you able to get to them?" → thank them → hang up
 ```
 
 The obvious design leads with the message to save a second. It is wrong. A
@@ -111,7 +112,12 @@ After the gate:
 - Say nothing about the subject's health, condition, or history.
 - Never ask a stranger to pass the message on — that is a disclosure with extra
   steps.
-- Ask the recipient to confirm they have heard.
+- Ask whether they can go — **a question, not an instruction**. "Confirm you are
+  going to her" reads as an order barked at someone just woken up. Ask once,
+  accept the answer, do not press. They may be two hours away.
+- Sound like a person passing on a message, not a system issuing one. Models
+  drift officious when handed numbered steps and a schema; say the register you
+  want out loud.
 - **Voicemail names nobody.** It is the one case where the gate cannot run, so
   the message must be safe for a whole room to overhear: no name, no reason,
   just "there is an alert waiting in your app".
