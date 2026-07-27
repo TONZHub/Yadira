@@ -46,6 +46,38 @@ because on a phone call nobody is in the room to notice.
 
 ## Real calls
 
+Two transports. **The Developer API is preferred and is what a deployment should
+use** — set `CALLE_API_KEY` and the CLI is not involved at all:
+
+```bash
+export CALLE_API_KEY="calle_live_..."   # from your CALL-E account
+npm run build && npm start
+```
+
+A static key deploys: no browser login on the host, nothing cached in a
+container that a redeploy will wipe, no binary to locate. It also lets us
+declare a `recipient_result_schema`, so CALL-E returns a validated readout
+rather than us inferring one from a transcript.
+
+The route uses `POST /v1/calls` then polls `GET /v1/calls/{id}` until the call
+reaches a terminal state. An unrecognised status keeps polling rather than being
+treated as finished, so a new status name upstream delays a readout instead of
+faking one. `CALLE_WEBHOOK_URL` is passed through when set, but polling still
+runs — a laptop has no publicly reachable URL.
+
+### Testing it without the live service
+
+`node scripts/fake-calle-api.mjs` (in `wellbeing-check-in-call/scripts/`) serves
+the documented shapes locally:
+
+```bash
+node calle/wellbeing-check-in-call/scripts/fake-calle-api.mjs vendorMissedIt &
+CALLE_API_KEY=test CALLE_API_BASE_URL=http://127.0.0.1:9099 npm start
+```
+
+### CLI fallback
+
+With no `CALLE_API_KEY`, the app falls back to the CLI.
 `@call-e/cli` is a **project dependency**, so `npm install` provides it and the
 server finds it at `node_modules/.bin/calle`. Nothing needs installing globally
 — that was the original design and it meant a fresh deploy, which only runs

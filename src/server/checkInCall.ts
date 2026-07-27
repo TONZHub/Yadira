@@ -26,6 +26,7 @@
 
 import { detectLucidity, type LucidityKind } from './lucidity';
 import { placeOneCall, maskPhone, isE164, type CallActivity, type CallStatus } from './calle';
+import { hasApiKey, placeCallAndWait, type CalleCallResult } from './calleApi';
 
 export type CheckInMood = 'peaceful' | 'anxious' | 'restless' | 'sad';
 
@@ -219,6 +220,151 @@ export function summariseCall(
   };
 }
 
+// ------------------------------------------------- CALL-E structured result
+
+/**
+ * The readout we ask CALL-E to return, declared as a schema so it comes back
+ * validated instead of inferred from a transcript.
+ *
+ * Deliberately small. Every field is something a caregiver can act on, and
+ * every field is phrased so the honest answer to "they didn't really say" is
+ * available — `unclear` and `unknown` exist so the model is never forced to
+ * invent a wellbeing signal that will be charted and acted upon.
+ */
+export const RECIPIENT_RESULT_SCHEMA = {
+  type: 'object',
+  required: ['answered', 'mood'],
+  properties: {
+    answered: {
+      type: 'string',
+      enum: ['recipient', 'someone_else', 'voicemail', 'no_answer'],
+      description: 'Who actually picked up the phone.',
+    },
+    mood: {
+      type: 'string',
+      enum: ['peaceful', 'anxious', 'restless', 'sad', 'unclear'],
+      description:
+        'How the person themselves sounded, from their own words. Use "unclear" when they did not say anything that clearly indicates mood — never guess.',
+    },
+    distress: {
+      type: 'string',
+      enum: ['none', 'possible', 'urgent'],
+      description:
+        'Did they ask for help, report pain, a fall, fear, or not knowing where they are? "urgent" means a person should go to them now.',
+    },
+    distress_detail: {
+      type: 'string',
+      description: 'One plain sentence a family member can read, or empty when distress is "none".',
+    },
+    wanted_company: {
+      type: 'string',
+      enum: ['yes', 'no', 'unknown'],
+      description: 'Did they express wanting someone with them?',
+    },
+  },
+} as const;
+
+/** Map CALL-E's transcript turns onto our speaker-tagged shape. Their
+ *  speakers are "bot" and "user"; only the user's words are ever interpreted. */
+function turnsToActivity(result: CalleCallResult): CallActivity[] {
+  return result.turns
+    .map((t) => {
+      const speaker = String(t.speaker || '').toLowerCase();
+      return {
+        speaker: (speaker.includes('bot') || speaker.includes('agent')
+          ? 'agent'
+          : speaker.includes('user') || speaker.includes('recipient')
+            ? 'recipient'
+            : 'system') as CallActivity['speaker'],
+        text: String(t.text || '').trim(),
+      };
+    })
+    .filter((t) => t.text);
+}
+
+/**
+ * Combine CALL-E's structured result with our own independent reading of the
+ * transcript.
+ *
+ * The two are NOT redundant, and the vendor's answer does not simply win. A
+ * distress signal is the one output where being wrong in one direction is much
+ * worse than the other, so the checks are a union: if either CALL-E's schema
+ * result or our own patterns see distress, the caregiver is told. Yadira's
+ * lucidity tripwire likewise runs on the raw words regardless of what the
+ * model concluded — that judgment belongs to this product, not to a supplier.
+ */
+export function summariseApiCall(result: CalleCallResult, req: CheckInCallRequest): CheckInCallResult {
+  const activity = turnsToActivity(result);
+  const structured = result.recipientResult || {};
+
+  const answeredBy = String(structured.answered || '');
+  const answered = answeredBy
+    ? answeredBy === 'recipient'
+    : activity.some((a) => a.speaker === 'recipient');
+
+  // Mood: CALL-E's, unless it declined to say — then our own reading, which may
+  // also return null. Nothing here invents a value.
+  const vendorMood = String(structured.mood || '');
+  const mood: CheckInMood | null =
+    vendorMood && vendorMood !== 'unclear' ? (vendorMood as CheckInMood) : readMood(activity);
+
+  const reasons: string[] = [];
+  const vendorDistress = String(structured.distress || 'none');
+  if (vendorDistress === 'urgent' || vendorDistress === 'possible') {
+    reasons.push(String(structured.distress_detail || 'CALL-E flagged distress on the call'));
+  }
+  // Our own patterns run regardless — a supplier's "none" does not silence them.
+  for (const own of readDistress(activity)) {
+    if (!reasons.some((r) => r.toLowerCase().includes(own))) reasons.push(own);
+  }
+
+  const lucidity = detectLucidity(
+    activity.filter((a) => a.speaker === 'recipient').map((a) => a.text).join(' '),
+    'Yadira'
+  );
+  if (lucidity) reasons.push('showed a window of real clarity');
+
+  if (answeredBy === 'someone_else') reasons.push('someone else answered the phone');
+  if (!answered && answeredBy !== 'someone_else') reasons.push(answeredBy === 'voicemail' ? 'reached voicemail' : 'did not answer');
+
+  const needsCaregiver =
+    vendorDistress === 'urgent' ||
+    lucidity !== null ||
+    readDistress(activity).length > 0 ||
+    vendorDistress === 'possible';
+
+  let summary: string;
+  if (!answered) {
+    summary =
+      answeredBy === 'voicemail'
+        ? `${req.patientName} did not pick up; a short hello was left with nothing about their health.`
+        : answeredBy === 'someone_else'
+          ? `Someone else answered ${req.patientName}'s phone. Nothing about their health was shared.`
+          : `${req.patientName} did not answer.`;
+  } else if (needsCaregiver) {
+    summary = `${req.patientName} answered, and this call needs you: ${reasons.join('; ')}.`;
+  } else if (mood) {
+    const moodWord = { peaceful: 'settled', anxious: 'a little worried', restless: 'restless', sad: 'low' }[mood];
+    summary = `${req.patientName} answered and sounded ${moodWord}.`;
+  } else {
+    summary = `${req.patientName} answered and had a short chat. Nothing stood out.`;
+  }
+  if (structured.wanted_company === 'yes') summary += ' They said they would like someone with them.';
+
+  return {
+    runId: result.callId,
+    answered,
+    state: result.status,
+    phone: maskPhone(req.toPhone),
+    mood,
+    lucidity,
+    needsCaregiver,
+    reasons,
+    summary,
+    transcript: activity,
+  };
+}
+
 // ------------------------------------------------------------ orchestration
 
 export async function placeCheckInCall(req: CheckInCallRequest): Promise<CheckInCallResult> {
@@ -233,6 +379,26 @@ export async function placeCheckInCall(req: CheckInCallRequest): Promise<CheckIn
   }
 
   const goal = buildCallGoal(req);
+
+  // The Developer API is preferred whenever a key is configured: a static key
+  // deploys, a per-machine OAuth cache does not. The CLI stays as the fallback
+  // so an existing `calle auth login` keeps working with no key at all.
+  if (hasApiKey()) {
+    const result = await placeCallAndWait({
+      task: goal,
+      phone: req.toPhone,
+      region: req.region,
+      locale: req.language,
+      recipientResultSchema: RECIPIENT_RESULT_SCHEMA as unknown as Record<string, any>,
+      // One check-in per patient per minute is the most a retry should ever
+      // produce — a duplicated request must not ring them twice.
+      idempotencyKey: `yadira-checkin-${req.toPhone}-${new Date().toISOString().slice(0, 16)}`,
+      webhookUrl: process.env.CALLE_WEBHOOK_URL || undefined,
+      metadata: { product: 'yadira', workflow: 'check-in-call' },
+    });
+    return summariseApiCall(result, req);
+  }
+
   const { status } = await placeOneCall({
     toPhone: req.toPhone,
     goal,
