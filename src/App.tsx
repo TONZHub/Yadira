@@ -419,6 +419,11 @@ function AppContent() {
   // without hunting for it.
   const [checkInCall, setCheckInCall] = useStoreDoc<{
     phone?: string;
+    /** The CAREGIVER's own number — rung when the help button is pressed.
+        Deliberately separate from `phone` above, which is the patient's:
+        dialling the wrong one would mean telling a frightened person that a
+        frightened person needs help. */
+    escalationPhone?: string;
     /** CALL-E calling region. Chosen, never inferred — it decides how the
         call sounds, and CALL-E's own default is not the family's accent. */
     region?: string;
@@ -946,7 +951,17 @@ function AppContent() {
     fetch('/api/caregiver-alert', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ active, circle: getCircleId() }),
+      body: JSON.stringify({
+        active,
+        circle: getCircleId(),
+        // Rings the caregiver as well as raising the banner. Sent from here so
+        // the server needs no stored state of its own; when it is absent the
+        // alert behaves exactly as it always has.
+        escalationPhone: checkInCall.escalationPhone || undefined,
+        patientName: profile.patientName,
+        caregiverName: profile.caregiverName,
+        region: checkInCall.region || undefined,
+      }),
     }).catch((err) => console.warn('[Yadira] caregiver-alert push failed', err));
   };
 
@@ -3391,6 +3406,23 @@ function AppContent() {
                       placeholder="+15551234567"
                       className="mt-2.5 w-full text-sm px-3 py-2 rounded-xl border border-[#E3DFC2] bg-white focus:outline-none focus:ring-2 focus:ring-[#3A5D45]/20"
                     />
+                    <label className="sr-only" htmlFor="help-call-phone">
+                      Your own phone number, rung when they press the help button
+                    </label>
+                    <input
+                      id="help-call-phone"
+                      type="tel"
+                      inputMode="tel"
+                      value={checkInCall.escalationPhone || ''}
+                      onChange={(e) => setCheckInCall({ ...checkInCall, escalationPhone: e.target.value })}
+                      placeholder="Your number, for the help button"
+                      className="mt-2 w-full text-sm px-3 py-2 rounded-xl border border-rose-200 bg-rose-50/40 focus:outline-none focus:ring-2 focus:ring-rose-300/40"
+                    />
+                    <span className="text-[10px] text-[#5E5D57] leading-tight mt-1 block">
+                      <b>Yours, not theirs.</b> When {profile.patientName || 'they'} press the help button, Yadira
+                      raises the alert here <i>and</i> rings this number straight away — a banner is easy to miss, a
+                      ringing phone is not.
+                    </span>
                     <label className="sr-only" htmlFor="check-in-region">
                       Where they are — sets the voice's accent
                     </label>
