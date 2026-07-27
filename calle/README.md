@@ -83,6 +83,13 @@ Two easy marks to check first, because they are the repository's own rules:
 every sample number is fictional and masked, and the contribution ships a
 no-call path. Both hold.
 
+## Feedback for the CALL-E team
+
+[FEEDBACK.md](FEEDBACK.md) — what building this actually surfaced, measured on
+live calls: an unknown caller ID being the biggest practical problem, ~2 minutes
+to ring, no voice control, and the parts of the API that shaped the design in
+good ways.
+
 ## What this deliberately does not do
 
 - **It does not phone the patient.** CALL-E speaks in its own voice with no way

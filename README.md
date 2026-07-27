@@ -241,6 +241,7 @@ Some of these look like limitations and are load-bearing:
 | [STRIPE-SETUP.md](STRIPE-SETUP.md) | Caregiver Pro billing |
 | [EMAIL-SETUP.md](EMAIL-SETUP.md) | Welcome email via Resend |
 | [calle/README.md](calle/README.md) | The help-button call, and submitting the Agent Skill |
+| [calle/FEEDBACK.md](calle/FEEDBACK.md) | What building on CALL-E surfaced, measured on live calls |
 | [SPONSORS.md](SPONSORS.md) | Why sponsorship keeps this free for families |
 | [docs/demo/](docs/demo/) | Demo reel script, FAQ video script, camera-ready seeding |
 

@@ -3360,7 +3360,8 @@ function AppContent() {
                     </span>
                     <span className="text-[10px] text-[#5E5D57] leading-tight mt-1 block">
                       When {profile.patientName || 'they'} press the help button, Yadira raises the alert here{' '}
-                      <i>and</i> rings your phone straight away. A banner is easy to miss; a ringing phone is not.
+                      <i>and</i> calls your phone. A banner is easy to miss; a ringing phone is not. The call
+                      usually takes a minute or two to come through, so the banner is always first.
                     </span>
                     <label className="sr-only" htmlFor="help-call-phone">
                       Your own phone number, in full international form
@@ -3395,7 +3396,9 @@ function AppContent() {
                     </select>
                     <span className="text-[10px] text-[#7E7D76] leading-tight mt-2 block">
                       The call says only that {profile.patientName || 'they'} asked for you, and when. It never
-                      discusses their health, and repeated presses will not ring you over and over.
+                      discusses their health, and repeated presses will not ring you over and over. It comes from
+                      an unfamiliar number — worth saving as a contact once you have seen it, so it is not
+                      silenced at four in the morning.
                     </span>
                     {!isPremium && (
                       <div className="mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border border-[#E3DFC2] bg-[#FCFAF5] text-[#5E5D57]">
