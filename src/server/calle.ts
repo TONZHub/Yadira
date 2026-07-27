@@ -146,13 +146,32 @@ export interface CallPlan {
   raw: any;
 }
 
+/**
+ * Verified against `@call-e/cli`, which answers with:
+ *   { server_url, cache_path, cache_exists, pending_exists, usable,
+ *     expires_at, pending_status, pending_login_url }
+ * `usable` is the field that decides it. The others turn "not authorized" into
+ * something the caregiver's log can act on — never logged in on this machine is
+ * a different problem from a token that has aged out.
+ */
 export async function authStatus(): Promise<{ authorized: boolean; detail?: string }> {
   if (isDryRun()) return { authorized: true, detail: 'dry-run' };
   const payload = await calleJson(['auth', 'status'], 'auth status');
-  const token = pickField(payload, ['token', 'has_token', 'hasToken', 'authorized', 'valid']);
+
   const usable = pickField(payload, ['usable', 'is_usable', 'isUsable']);
-  const authorized = Boolean(usable ?? token);
-  return { authorized, detail: authorized ? undefined : 'no usable CALL-E token' };
+  const fallback = pickField(payload, ['token', 'has_token', 'hasToken', 'authorized', 'valid']);
+  if (Boolean(usable ?? fallback)) return { authorized: true };
+
+  const cacheExists = pickField(payload, ['cache_exists', 'cacheExists']);
+  const expiresAt = pickField(payload, ['expires_at', 'expiresAt']);
+  const detail =
+    cacheExists === false
+      ? 'no CALL-E login on this machine'
+      : expiresAt
+        ? `the CALL-E token expired at ${expiresAt}`
+        : 'no usable CALL-E token';
+  // The login URL is deliberately not echoed — it is a credential.
+  return { authorized: false, detail };
 }
 
 export async function planCall(opts: {

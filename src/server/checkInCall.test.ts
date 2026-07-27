@@ -72,6 +72,37 @@ describe('inspectPlan — the gate before dialling', () => {
   });
 });
 
+describe('the real @call-e/cli auth status payload', () => {
+  // Captured from `calle auth status` against @call-e/cli, so a field rename
+  // upstream fails here rather than at the moment someone needs a call placed.
+  const signedOut = {
+    server_url: 'https://example.test/mcp/openagent_oauth',
+    cache_path: '/root/.calle-mcp/cli/abc/token.json',
+    cache_exists: false,
+    pending_exists: false,
+    usable: false,
+    expires_at: null,
+    pending_status: null,
+    pending_login_url: null,
+  };
+
+  test('"usable" is the field that decides authorization', () => {
+    assert.equal(pickField(signedOut, ['usable', 'is_usable']), false);
+    assert.equal(pickField({ ...signedOut, usable: true }, ['usable']), true);
+  });
+
+  test('a never-logged-in machine is distinguishable from an expired token', () => {
+    assert.equal(pickField(signedOut, ['cache_exists']), false);
+    assert.equal(pickField({ ...signedOut, cache_exists: true, expires_at: '2026-01-01T00:00:00Z' }, ['expires_at']), '2026-01-01T00:00:00Z');
+  });
+
+  test('a null field is skipped so the fallback chain keeps looking', () => {
+    // expires_at is null when nobody has ever logged in; treating that as a
+    // present value would stop the search at a field that says nothing.
+    assert.equal(pickField(signedOut, ['expires_at', 'cache_path']), '/root/.calle-mcp/cli/abc/token.json');
+  });
+});
+
 describe('pickField tolerates CALL-E response shapes', () => {
   test('finds a top-level snake_case field', () => {
     assert.equal(pickField({ plan_id: 'p1' }, ['plan_id', 'planId']), 'p1');

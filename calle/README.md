@@ -46,10 +46,28 @@ because on a phone call nobody is in the room to notice.
 
 ## Real calls
 
-1. Install the CALL-E CLI and sign in (`calle auth login`). The account comes
-   with 20 free calls.
-2. Leave `CALLE_DRY_RUN` unset.
-3. Point the app at the CLI if it isn't on `PATH`:
+The CLI resolves as `calle` on `PATH`, which is where a global install puts it —
+verified end to end against `@call-e/cli`.
+
+```bash
+npm install -g @call-e/cli
+
+# Attribution env vars; they carry no user data.
+env CALLE_SOURCE=yadira CALLE_INTEGRATION=yadira-check-in-call CALLE_INTEGRATION_VERSION=0.1.0 \
+  calle auth login          # finish authorization in the browser
+
+env CALLE_SOURCE=yadira CALLE_INTEGRATION=yadira-check-in-call CALLE_INTEGRATION_VERSION=0.1.0 \
+  calle auth status         # expect "usable": true
+```
+
+Then leave `CALLE_DRY_RUN` unset and the app places real calls. Until a token
+exists the route refuses cleanly and dials nothing:
+
+```json
+{ "error": "CALL-E is not authorized (no CALL-E login on this machine). Run: calle auth login" }
+```
+
+Point the app at the CLI if it isn't on `PATH`:
 
 | Variable | Purpose |
 | --- | --- |
