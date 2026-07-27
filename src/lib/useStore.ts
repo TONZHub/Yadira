@@ -27,6 +27,12 @@ import { db, isFirebaseConfigured, getCircleId } from './firebase';
 // can never see each other's cached data (a paying family's memories must
 // not flash up for whoever logs in next on the same device).
 
+// How long a caller gating on `synced` waits for Firestore before falling
+// back to the local mirror. Long enough for a healthy connection on a slow
+// tablet, short enough that a patient isn't left staring at a screen that
+// was supposed to greet them.
+const SYNC_SETTLE_MS = 3500;
+
 function lsKey(key: string): string {
   return `yadira_${getCircleId()}_${key}`;
 }
@@ -74,6 +80,14 @@ export function useStoreList<T extends Record<string, any>>(
   useEffect(() => {
     if (!isFirebaseConfigured || !db) return;
 
+    // A blocked or offline transport makes onSnapshot retry indefinitely
+    // WITHOUT calling the error handler, so `synced` would never resolve and
+    // anything gated on it never happens (camp's auto-open is the one that
+    // matters — the patient simply never meets Hattie). Give the cloud a
+    // moment, then commit to the local mirror; a late snapshot still applies
+    // normally when it lands.
+    const settleTimer = setTimeout(() => setSynced(true), SYNC_SETTLE_MS);
+
     const colRef = collection(db, 'careCircles', circleId, key);
     const unsub = onSnapshot(
       colRef,
@@ -89,9 +103,21 @@ export function useStoreList<T extends Record<string, any>>(
         }
         setSynced(true);
       },
-      (err) => console.warn(`[Yadira] Firestore listen failed for "${key}"`, err)
+      (err) => {
+        // A failed listen still ANSWERS the question "what does the cloud
+        // have?" — with "nothing reachable". Callers gate first paint on
+        // `synced` (camp's auto-open, the premium restore), so leaving it
+        // false on error hangs those features forever instead of falling
+        // back to the local mirror. This is the same degradation the rest of
+        // the app follows: no cloud is not an error state, it's local mode.
+        console.warn(`[Yadira] Firestore listen failed for "${key}" — using the local mirror`, err);
+        setSynced(true);
+      }
     );
-    return unsub;
+    return () => {
+      clearTimeout(settleTimer);
+      unsub();
+    };
   }, [key, circleId]);
 
   const update = useCallback(
@@ -155,6 +181,9 @@ export function useStoreDoc<T extends Record<string, any>>(
   useEffect(() => {
     if (!isFirebaseConfigured || !db) return;
 
+    // Same bounded wait as the list store — see the note there.
+    const settleTimer = setTimeout(() => setSynced(true), SYNC_SETTLE_MS);
+
     const docRef = doc(db, 'careCircles', circleId, 'meta', key);
     const unsub = onSnapshot(
       docRef,
@@ -170,9 +199,21 @@ export function useStoreDoc<T extends Record<string, any>>(
         }
         setSynced(true);
       },
-      (err) => console.warn(`[Yadira] Firestore listen failed for "${key}"`, err)
+      (err) => {
+        // A failed listen still ANSWERS the question "what does the cloud
+        // have?" — with "nothing reachable". Callers gate first paint on
+        // `synced` (camp's auto-open, the premium restore), so leaving it
+        // false on error hangs those features forever instead of falling
+        // back to the local mirror. This is the same degradation the rest of
+        // the app follows: no cloud is not an error state, it's local mode.
+        console.warn(`[Yadira] Firestore listen failed for "${key}" — using the local mirror`, err);
+        setSynced(true);
+      }
     );
-    return unsub;
+    return () => {
+      clearTimeout(settleTimer);
+      unsub();
+    };
   }, [key, circleId]);
 
   const update = useCallback(

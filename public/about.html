@@ -9,25 +9,39 @@
 <script>
   // Apply the shared large-font preference before paint (mirrors the app).
   try { if (localStorage.getItem('yadira_large_font') === '1') document.documentElement.style.fontSize = '125%'; } catch (e) {}
+  // Collapse to a single panel before first paint — only when JS is running.
+  document.documentElement.classList.add('pre-tabs');
 </script>
 <style>
   :root{
     --sage:#3A5D45; --sage2:#5C8D71; --cream:#FBF8F0; --paper:#F4EFE4;
-    --ink:#2C2C2A; --sub:#5E5D57; --faint:#7E7D76; --line:#E3DFC2;
-    --rose:#C97B84; --amber:#C8A96A;
+    --ink:#2C2C2A; --sub:#54534D; --faint:#63625B; --line:#E3DFC2;
+    --rose:#C97B84; --amber:#8F7230;
   }
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;background:var(--paper);color:var(--ink);line-height:1.6}
+
+  /* The base is 1.125rem, not 18px: the larger-text toggle scales the ROOT
+     font-size to 125%, and an absolute px base would simply ignore it. As a
+     rem it renders at 18px normally and ~22.5px enlarged, which is the range
+     the handoff expects. */
+
+  /* Visible keyboard focus everywhere — the page had none. */
+  a:focus-visible, button:focus-visible{outline:3px solid #5C8D71;outline-offset:3px;border-radius:6px}
+
+  /* Skip to content — first thing in the tab order, visible only on focus. */
+  .skip{position:absolute;left:-999px;top:8px;background:var(--sage);color:#fff;padding:14px 22px;border-radius:10px;font-weight:700;z-index:100}
+  .skip:focus{left:16px}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;font-size:1.125rem;background:var(--paper);color:var(--ink);line-height:1.6}
   .wrap{max-width:1040px;margin:0 auto;padding:0 24px}
   a{color:var(--sage);}
 
   /* hero */
   .hero{background:linear-gradient(165deg,#FBF8F0 0%,#EFE9D8 70%,#E7E0CB 100%);border-bottom:1px solid var(--line);padding:64px 0 72px;text-align:center}
   .hero img.logo{width:min(340px,70vw);height:auto;margin-bottom:8px}
-  .hero h1{font-size:clamp(26px,4.4vw,42px);font-weight:800;letter-spacing:-.01em;max-width:760px;margin:10px auto 14px}
-  .hero p.sub{font-size:clamp(16px,2.2vw,19px);color:var(--sub);max-width:640px;margin:0 auto 30px}
+  .hero h1{font-size:clamp(30px,4.6vw,46px);font-weight:800;letter-spacing:-.01em;max-width:760px;margin:10px auto 14px}
+  .hero p.sub{font-size:clamp(18px,2.4vw,22px);color:var(--sub);max-width:640px;margin:0 auto 30px}
   .cta-row{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}
-  .btn{display:inline-block;padding:15px 28px;border-radius:999px;font-weight:800;font-size:16px;text-decoration:none;transition:transform .15s ease}
+  .btn{display:inline-flex;align-items:center;justify-content:center;min-height:60px;padding:18px 34px;border-radius:999px;font-weight:800;font-size:19px;text-decoration:none;transition:transform .15s ease}
   .btn:hover{transform:translateY(-2px)}
   .btn-primary{background:var(--sage);color:#fff;box-shadow:0 6px 18px rgba(58,93,69,.25)}
   .btn-ghost{background:#fff;color:var(--sage);border:2px solid var(--sage)}
@@ -35,40 +49,40 @@
 
   /* story */
   .story{padding:72px 0;text-align:center}
-  .story blockquote{font-size:clamp(19px,2.8vw,26px);font-weight:600;line-height:1.5;max-width:740px;margin:0 auto;color:var(--ink)}
+  .story blockquote{font-size:clamp(22px,3vw,28px);font-weight:600;line-height:1.5;max-width:740px;margin:0 auto;color:var(--ink)}
   .story blockquote em{color:var(--sage)}
-  .story .attribution{margin-top:18px;color:var(--faint);font-size:14px;max-width:620px;margin-left:auto;margin-right:auto}
+  .story .attribution{margin-top:18px;color:var(--faint);font-size:18px;max-width:620px;margin-left:auto;margin-right:auto}
 
   /* features */
   .features{background:var(--cream);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:72px 0}
-  .features h2, .model h2{font-size:clamp(22px,3vw,30px);font-weight:800;text-align:center;margin-bottom:8px}
-  .features .lead, .model .lead{text-align:center;color:var(--sub);max-width:640px;margin:0 auto 44px}
+  .features h2, .model h2{font-size:clamp(26px,3.4vw,34px);font-weight:800;text-align:center;margin-bottom:8px}
+  .features .lead, .model .lead{text-align:center;font-size:19px;color:var(--sub);max-width:640px;margin:0 auto 44px}
   .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:20px}
   .card{background:#fff;border:1px solid var(--line);border-radius:22px;padding:26px}
   .card .emoji{font-size:28px}
-  .card h3{font-size:17px;font-weight:800;margin:10px 0 6px}
-  .card p{font-size:14.5px;color:var(--sub)}
+  .card h3{font-size:20px;font-weight:800;margin:10px 0 6px}
+  .card p{font-size:17px;color:var(--sub)}
 
   /* model */
   .model{padding:72px 0}
   .tiers{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
   .tier{background:#fff;border:1px solid var(--line);border-radius:22px;padding:28px;text-align:center;display:flex;flex-direction:column}
   .tier.highlight{border:2px solid var(--sage);box-shadow:0 10px 30px rgba(58,93,69,.12)}
-  .tier .who{font-size:12px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--sage2)}
-  .tier .price{font-size:30px;font-weight:800;margin:10px 0 2px}
+  .tier .who{font-size:13px;font-weight:800;letter-spacing:.14em;text-transform:uppercase;color:var(--sage2)}
+  .tier .price{font-size:36px;font-weight:800;margin:10px 0 2px}
   .tier .per{font-size:13px;color:var(--faint);margin-bottom:14px}
-  .tier ul{list-style:none;text-align:left;font-size:14px;color:var(--sub);margin:0 auto 20px;max-width:250px}
+  .tier ul{list-style:none;text-align:left;font-size:16px;color:var(--sub);margin:0 auto 20px;max-width:250px}
   .tier li{padding:5px 0 5px 26px;position:relative}
   .tier li::before{content:"✓";position:absolute;left:0;color:var(--sage2);font-weight:800}
-  .tier .btn{margin-top:auto;font-size:14px;padding:12px 20px}
+  .tier .btn{margin-top:auto;min-height:52px;font-size:16px;padding:14px 22px}
 
   /* cta band */
   .band{background:var(--sage);color:#fff;padding:60px 0;text-align:center}
   .band h2{font-size:clamp(21px,3vw,28px);font-weight:800;margin-bottom:10px}
-  .band p{color:#DCE9DF;max-width:560px;margin:0 auto 26px;font-size:15.5px}
+  .band p{color:#DCE9DF;max-width:560px;margin:0 auto 26px;font-size:18px}
   .band .btn-primary{background:#fff;color:var(--sage)}
 
-  footer{padding:44px 0 56px;text-align:center;font-size:13px;color:var(--faint)}
+  footer{padding:44px 0 56px;text-align:center;font-size:15px;color:var(--faint)}
   footer .disclaimer{max-width:640px;margin:0 auto 14px}
   footer .fine{opacity:.8}
 
@@ -78,41 +92,46 @@
   .hero-nav a:hover{border-bottom-color:var(--sage2)}
 
   /* larger-text toggle (fixed, top-right) */
-  .font-toggle{position:fixed;top:14px;right:14px;z-index:50;display:inline-flex;align-items:center;gap:7px;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--sage);font-weight:700;font-size:14px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.06)}
+  .font-toggle{position:fixed;top:14px;right:14px;z-index:50;display:inline-flex;align-items:center;gap:7px;min-height:48px;padding:8px 14px;border-radius:999px;border:1px solid var(--line);background:#fff;color:var(--sage);font-weight:700;font-size:14px;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.06)}
   .font-toggle:hover{background:var(--cream)}
   .font-toggle .aa{font-weight:800;letter-spacing:-1px}
   .font-toggle .aa .big{font-size:1.15em}
 
   /* section tabs — show one panel at a time so the page isn't a marathon scroll */
   .tab-bar{position:sticky;top:0;z-index:30;display:flex;gap:6px;justify-content:center;flex-wrap:wrap;background:rgba(251,248,240,.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:10px 16px}
-  .tab-btn{appearance:none;border:none;background:none;font:inherit;font-weight:700;font-size:15px;color:var(--sub);padding:9px 16px;border-radius:999px;cursor:pointer;transition:all .15s ease}
+  .tab-btn{appearance:none;border:none;background:none;font:inherit;font-weight:700;font-size:17px;color:var(--sub);min-height:48px;padding:12px 20px;border-radius:999px;cursor:pointer;transition:all .15s ease}
   .tab-btn:hover{color:var(--sage);background:var(--cream)}
   .tab-btn[aria-selected="true"]{color:#fff;background:var(--sage)}
   .tab-panel[hidden]{display:none}
+  /* Before the tabs script runs, show only the default panel so the page
+     doesn't flash all four. The class is added by an inline <head> script and
+     removed once the script has taken over, so with JS OFF it is never
+     present and every panel renders — a long scroll, but nothing is lost. */
+  html.pre-tabs .tab-panel:not([data-panel="about"]){display:none}
 
   /* about */
   .about{padding:72px 0;border-bottom:1px solid var(--line)}
-  .about h2{font-size:clamp(22px,3vw,30px);font-weight:800;text-align:center;margin-bottom:8px}
-  .about .lead{text-align:center;color:var(--sub);max-width:640px;margin:0 auto 40px}
+  .about h2{font-size:clamp(26px,3.4vw,34px);font-weight:800;text-align:center;margin-bottom:8px}
+  .about .lead{text-align:center;font-size:19px;color:var(--sub);max-width:640px;margin:0 auto 40px}
   .about-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:28px;max-width:900px;margin:0 auto}
-  .about-cols h3{font-size:16px;font-weight:800;color:var(--sage);margin-bottom:8px}
-  .about-cols p{font-size:14.5px;color:var(--sub)}
+  .about-cols h3{font-size:21px;font-weight:800;color:var(--sage);margin-bottom:8px}
+  .about-cols p{font-size:18px;color:var(--sub)}
 
   /* why choose — comparison table */
   .why{background:var(--cream);border-bottom:1px solid var(--line);padding:72px 0}
-  .why h2{font-size:clamp(22px,3vw,30px);font-weight:800;text-align:center;margin-bottom:8px}
-  .why .lead{text-align:center;color:var(--sub);max-width:640px;margin:0 auto 44px}
+  .why h2{font-size:clamp(26px,3.4vw,34px);font-weight:800;text-align:center;margin-bottom:8px}
+  .why .lead{text-align:center;font-size:19px;color:var(--sub);max-width:640px;margin:0 auto 44px}
   .compare-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:22px;border:1px solid var(--line);background:#fff;box-shadow:0 8px 26px rgba(58,93,69,.08)}
-  table.compare{width:100%;min-width:640px;border-collapse:collapse;font-size:14px}
+  table.compare{width:100%;min-width:640px;border-collapse:collapse;font-size:16px}
   .compare th,.compare td{padding:14px 14px;text-align:center;border-bottom:1px solid var(--line)}
   .compare tr:last-child th,.compare tr:last-child td{border-bottom:none}
   .compare thead th{font-size:13px;font-weight:800;padding-top:20px}
   .compare thead .who-emoji{display:block;font-size:26px;margin-bottom:4px}
   .compare thead .who-sub{display:block;font-size:10.5px;font-weight:600;color:var(--faint);margin-top:2px}
-  .compare td.feature,.compare th.feature{text-align:left;font-weight:700;font-size:13.5px;color:var(--ink);max-width:230px}
+  .compare td.feature,.compare th.feature{text-align:left;font-weight:700;font-size:15px;color:var(--ink);max-width:230px}
   .compare td.feature small{display:block;font-weight:500;color:var(--faint);font-size:11.5px;margin-top:1px}
-  .compare .yes{color:var(--sage2);font-weight:800;font-size:17px}
-  .compare .no{color:#C97B84;font-weight:800;font-size:17px}
+  .compare .yes{color:var(--sage2);font-weight:800;font-size:19px}
+  .compare .no{color:#B65E68;font-weight:800;font-size:19px}
   .compare .some{color:var(--amber);font-weight:800;font-size:14px}
   .compare col.yadira-col{background:#F0F6F1}
   .compare thead th.yadira{color:var(--sage)}
@@ -122,6 +141,8 @@
 </style>
 </head>
 <body>
+
+<a class="skip" href="#main">Skip to main content</a>
 
 <button class="font-toggle" id="fontToggle" type="button" aria-pressed="false" title="Larger text">
   <span class="aa" aria-hidden="true">A<span class="big">A</span></span>
@@ -165,14 +186,15 @@
   </div>
 </section>
 
-<nav class="tab-bar" aria-label="Sections">
-  <button class="tab-btn" type="button" data-tab="about" aria-selected="true">About</button>
-  <button class="tab-btn" type="button" data-tab="why" aria-selected="false">Why choose Yadira</button>
-  <button class="tab-btn" type="button" data-tab="features" aria-selected="false">Features</button>
-  <button class="tab-btn" type="button" data-tab="pricing" aria-selected="false">Pricing</button>
-</nav>
+<div class="tab-bar" role="tablist" aria-label="Sections">
+  <button class="tab-btn" type="button" role="tab" id="tab-about" aria-controls="panel-about" data-tab="about" aria-selected="true" tabindex="0">About</button>
+  <button class="tab-btn" type="button" role="tab" id="tab-why" aria-controls="panel-why" data-tab="why" aria-selected="false" tabindex="-1">Why choose Yadira</button>
+  <button class="tab-btn" type="button" role="tab" id="tab-features" aria-controls="panel-features" data-tab="features" aria-selected="false" tabindex="-1">Features</button>
+  <button class="tab-btn" type="button" role="tab" id="tab-pricing" aria-controls="panel-pricing" data-tab="pricing" aria-selected="false" tabindex="-1">Pricing</button>
+</div>
 
-<div class="tab-panel" data-panel="about">
+<main id="main">
+<div class="tab-panel" role="tabpanel" id="panel-about" aria-labelledby="tab-about" data-panel="about">
 <section class="story">
   <div class="wrap">
     <blockquote>
@@ -207,7 +229,7 @@
 </section>
 </div><!-- /about panel -->
 
-<div class="tab-panel" data-panel="why" hidden>
+<div class="tab-panel" role="tabpanel" id="panel-why" aria-labelledby="tab-why" data-panel="why">
 <section class="why" id="why">
   <div class="wrap">
     <h2>Why choose Yadira</h2>
@@ -272,7 +294,7 @@
 </section>
 </div><!-- /why panel -->
 
-<div class="tab-panel" data-panel="features" hidden>
+<div class="tab-panel" role="tabpanel" id="panel-features" aria-labelledby="tab-features" data-panel="features">
 <section class="features" id="features">
   <div class="wrap">
     <h2>Built for both sides of care</h2>
@@ -289,7 +311,7 @@
 </section>
 </div><!-- /features panel -->
 
-<div class="tab-panel" data-panel="pricing" hidden>
+<div class="tab-panel" role="tabpanel" id="panel-pricing" aria-labelledby="tab-pricing" data-panel="pricing">
 <section class="model" id="pricing">
   <div class="wrap">
     <h2>Free for families. Sustained by the people who can pay.</h2>
@@ -344,6 +366,7 @@
   </div>
 </section>
 </div><!-- /pricing panel -->
+</main>
 
 <footer>
   <div class="wrap">
@@ -358,16 +381,26 @@
   (function () {
     var buttons = Array.prototype.slice.call(document.querySelectorAll('[data-tab]'));
     var panels = Array.prototype.slice.call(document.querySelectorAll('.tab-panel'));
+    var tabs = Array.prototype.slice.call(document.querySelectorAll('.tab-btn'));
     var bar = document.querySelector('.tab-bar');
     var names = panels.map(function (p) { return p.getAttribute('data-panel'); });
 
-    function show(name, scroll) {
+    // syncHash=false on the very first call. Writing "#about" into the URL on
+    // load sets the browser's sequential-focus starting point to that section,
+    // which sits near the end of the panel — the first Tab then landed in the
+    // footer and the skip link was only reachable after wrapping all the way
+    // around. A real fragment the visitor arrived with is left alone.
+    function show(name, scroll, syncHash) {
       if (names.indexOf(name) === -1) name = 'about';
       panels.forEach(function (p) { p.hidden = p.getAttribute('data-panel') !== name; });
-      document.querySelectorAll('.tab-btn').forEach(function (b) {
-        b.setAttribute('aria-selected', b.getAttribute('data-tab') === name ? 'true' : 'false');
+      // Roving tabindex: only the selected tab is in the tab order, so Tab
+      // moves past the tab bar and the arrow keys move between tabs.
+      tabs.forEach(function (b) {
+        var selected = b.getAttribute('data-tab') === name;
+        b.setAttribute('aria-selected', selected ? 'true' : 'false');
+        b.tabIndex = selected ? 0 : -1;
       });
-      try { history.replaceState(null, '', '#' + name); } catch (e) {}
+      if (syncHash !== false) { try { history.replaceState(null, '', '#' + name); } catch (e) {} }
       if (scroll && bar) {
         // Bring the sticky bar (and the chosen panel beneath it) to the top,
         // so the section is immediately in view instead of below the hero.
@@ -382,8 +415,25 @@
       });
     });
 
+    // Arrow keys / Home / End move between tabs, per the ARIA tablist pattern.
+    tabs.forEach(function (btn, i) {
+      btn.addEventListener('keydown', function (e) {
+        var target = null;
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') target = (i + 1) % tabs.length;
+        else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') target = (i - 1 + tabs.length) % tabs.length;
+        else if (e.key === 'Home') target = 0;
+        else if (e.key === 'End') target = tabs.length - 1;
+        if (target === null) return;
+        e.preventDefault();
+        show(tabs[target].getAttribute('data-tab'), false);
+        tabs[target].focus();
+      });
+    });
+
     var initial = (location.hash || '').replace('#', '');
-    show(names.indexOf(initial) !== -1 ? initial : 'about', false);
+    show(names.indexOf(initial) !== -1 ? initial : 'about', false, false);
+    // The script now owns which panel is visible, so the pre-paint mask can go.
+    document.documentElement.classList.remove('pre-tabs');
 
     // Respond to hash navigation (back/forward, or a shared deep link opened
     // while the page is already loaded).

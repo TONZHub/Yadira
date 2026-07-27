@@ -587,7 +587,7 @@ function AppContent() {
   // share a voice, or the identities blur for the patient.
   const YADIRA_VOICES: Record<'female' | 'male', string> = {
     female: 'zippy-pecan-9151__design-voice-6cd2e59a',
-    male: 'zippy-pecan-9151__design-voice-457ee57f',
+    male: 'zippy-pecan-9151__design-voice-87c0a467',
   };
   const [aiUsage, setAiUsage] = useStoreDoc<{ lastInsightsAt?: number; lastRoutineAt?: number; caregiverChatCount?: number }>('aiUsage', {});
 
@@ -2126,15 +2126,37 @@ function AppContent() {
             </div>
           )}
 
-          {/* Return to camp — Hattie's check-in, patient side */}
+          {/* Return to camp — Hattie's check-in, patient side.
+              Once they've checked in today the tent carries a small check and
+              warms to the "done" green. Someone who cannot remember whether
+              they've already had their visit with Hattie can see that they
+              have — and camp stays open either way, so a second visit is
+              never refused. */}
           {activeTab === 'patient' && (
             <button
               id="btn-camp"
               onClick={() => setCampOpen(true)}
-              className="p-2 sm:p-2.5 rounded-xl border border-[#E3DFC2] bg-white text-[#A6A27B] hover:text-[#3A5D45] hover:border-[#CEDFCF] transition-all"
-              title="Visit Hattie at camp"
+              className={`relative p-2 sm:p-2.5 rounded-xl border transition-all ${
+                todaysCheckIn
+                  ? 'border-[#CEDFCF] bg-[#E8F1EB] text-[#3A5D45]'
+                  : 'border-[#E3DFC2] bg-white text-[#A6A27B] hover:text-[#3A5D45] hover:border-[#CEDFCF]'
+              }`}
+              title={todaysCheckIn ? "You've visited Hattie today" : 'Visit Hattie at camp'}
+              aria-label={
+                todaysCheckIn
+                  ? "Visit Hattie at camp — today's check-in is done"
+                  : 'Visit Hattie at camp'
+              }
             >
               <Tent className="w-5 h-5" />
+              {todaysCheckIn && (
+                <span
+                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#3A5D45] border-2 border-white flex items-center justify-center"
+                  aria-hidden="true"
+                >
+                  <Check className="w-2.5 h-2.5 text-white" strokeWidth={3.5} />
+                </span>
+              )}
             </button>
           )}
 
