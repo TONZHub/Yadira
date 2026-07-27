@@ -532,7 +532,7 @@ function AppContent() {
   // share a voice, or the identities blur for the patient.
   const YADIRA_VOICES: Record<'female' | 'male', string> = {
     female: 'zippy-pecan-9151__design-voice-6cd2e59a',
-    male: 'zippy-pecan-9151__design-voice-457ee57f',
+    male: 'zippy-pecan-9151__design-voice-87c0a467',
   };
   const [aiUsage, setAiUsage] = useStoreDoc<{ lastInsightsAt?: number; lastRoutineAt?: number; caregiverChatCount?: number }>('aiUsage', {});
 
