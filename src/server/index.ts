@@ -16,6 +16,7 @@ import {
 } from './textSafety';
 import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity';
 import { placeCheckInCall } from './checkInCall';
+import { placeHelpCall, withinCooldown, markCalled } from './helpCall';
 import { isDryRun as isCalleDryRun } from './calle';
 
 dotenv.config();
@@ -137,7 +138,37 @@ app.post('/api/caregiver-alert', async (req, res) => {
     return res.status(400).json({ error: 'active must be a boolean' });
   }
   const state = { active, at: Date.now() };
-  sharedCaregiverAlert.set(circleOf(req), state);
+  const circle = circleOf(req);
+  sharedCaregiverAlert.set(circle, state);
+
+  // The banner is only as good as somebody looking at a screen, and the whole
+  // reason this button exists is that the person pressing it cannot wait for
+  // that. So it also rings the caregiver's phone — immediately, not after a
+  // "did they notice?" delay.
+  //
+  // Fire-and-forget on purpose. The patient is standing there having asked for
+  // help; the response must not wait on a phone network, and a failure to
+  // connect must never surface to them as an error. Their screen has already
+  // told them their caregiver has been told, which remains true — the in-app
+  // alert is raised either way.
+  const escalationPhone = String(req.body?.escalationPhone || '').trim();
+  if (active && escalationPhone) {
+    if (withinCooldown(circle)) {
+      console.info('[Yadira CALL-E] help call suppressed — within cooldown for this circle.');
+    } else {
+      markCalled(circle);
+      void placeHelpCall({
+        toPhone: escalationPhone,
+        patientName: String(req.body?.patientName || 'Your loved one'),
+        caregiverName: req.body?.caregiverName ? String(req.body.caregiverName) : undefined,
+        at: state.at,
+        region: req.body?.region ? String(req.body.region) : undefined,
+      })
+        .then((r) => console.info(`[Yadira CALL-E] help call ${r.callId}: ${r.summary}`))
+        .catch((err) => console.warn('[Yadira CALL-E] help call failed:', err?.message || err));
+    }
+  }
+
   res.json({ ok: true, ...state });
 });
 
