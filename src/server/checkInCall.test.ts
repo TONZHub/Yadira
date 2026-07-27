@@ -6,7 +6,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { isE164, maskPhone, inspectPlan, pickField, type CallPlan, type CallStatus } from './calle';
+import { isE164, maskPhone, inspectPlan, pickField, resolveCliCommand, type CallPlan, type CallStatus } from './calle';
 import { buildCallGoal, readMood, readDistress, summariseCall, type CheckInCallRequest } from './checkInCall';
 
 const req: CheckInCallRequest = {
@@ -69,6 +69,48 @@ describe('inspectPlan — the gate before dialling', () => {
     const verdict = inspectPlan(plan([]), '+15551234567');
     assert.equal(verdict.ok, true);
     assert.match(verdict.reason, /did not echo/);
+  });
+});
+
+describe('resolving the CALL-E CLI', () => {
+  // The server used to depend on a GLOBAL install and nothing else, so it
+  // worked on the laptop where someone ran `npm install -g` and died with
+  // ENOENT on every fresh deploy. @call-e/cli is a project dependency now.
+  const saved = { cmd: process.env.CALLE_CLI_COMMAND, path: process.env.CALLE_CLI_PATH };
+  const clear = () => {
+    delete process.env.CALLE_CLI_COMMAND;
+    delete process.env.CALLE_CLI_PATH;
+  };
+  const restore = () => {
+    if (saved.cmd === undefined) delete process.env.CALLE_CLI_COMMAND;
+    else process.env.CALLE_CLI_COMMAND = saved.cmd;
+    if (saved.path === undefined) delete process.env.CALLE_CLI_PATH;
+    else process.env.CALLE_CLI_PATH = saved.path;
+  };
+
+  test('an explicit command wins over everything', () => {
+    clear();
+    process.env.CALLE_CLI_COMMAND = 'npx -y @call-e/cli@0.3.6';
+    assert.deepEqual(resolveCliCommand(), ['npx', '-y', '@call-e/cli@0.3.6']);
+    restore();
+  });
+
+  test('CALLE_CLI_PATH runs a repository-local checkout through node', () => {
+    clear();
+    process.env.CALLE_CLI_PATH = '/srv/call-e/packages/cli/bin/calle.js';
+    assert.deepEqual(resolveCliCommand(), ['node', '/srv/call-e/packages/cli/bin/calle.js']);
+    restore();
+  });
+
+  test('with no overrides it finds the installed dependency, not a global', () => {
+    clear();
+    const resolved = resolveCliCommand();
+    restore();
+    // node_modules/.bin/calle exists in this repo because @call-e/cli is a
+    // dependency. If this ever falls back to a bare "calle", a deploy that
+    // only ran `npm ci` has no CLI at all.
+    assert.equal(resolved.length, 1);
+    assert.match(resolved[0], /node_modules[\\/]\.bin[\\/]calle$/);
   });
 });
 
