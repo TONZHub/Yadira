@@ -15,6 +15,8 @@ import {
   escapeRegExp,
 } from './textSafety';
 import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity';
+import { placeCheckInCall } from './checkInCall';
+import { isDryRun as isCalleDryRun } from './calle';
 
 dotenv.config();
 
@@ -160,6 +162,50 @@ app.post('/api/lucidity-alert', async (req, res) => {
   const state = { active, at: Date.now() };
   sharedLucidityAlert.set(circleOf(req), state);
   res.json({ ok: true, ...state });
+});
+
+// ---- Check-in calls (CALL-E) -------------------------------------------
+// Yadira on the telephone, for the many people who cannot work a tablet but
+// will still answer a ringing phone. One call per request; recurrence belongs
+// to the caregiver's own scheduler, never to a provider-side schedule.
+//
+// The result is not just logged — a call that surfaced distress or a window of
+// clarity raises the SAME alerts the tablet raises, because nobody is in the
+// room to notice. A phone call is the surface where an unread result matters
+// most.
+app.post('/api/calls/check-in', async (req, res) => {
+  const { toPhone, patientName, caregiverName, threadToPickUp, memoryHints, timezone, language, region } =
+    req.body || {};
+
+  try {
+    const result = await placeCheckInCall({
+      toPhone: String(toPhone || '').trim(),
+      patientName: String(patientName || '').trim(),
+      caregiverName,
+      threadToPickUp,
+      memoryHints: Array.isArray(memoryHints) ? memoryHints.slice(0, 3).map(String) : undefined,
+      timezone: String(timezone || '').trim(),
+      language,
+      region,
+    });
+
+    const circle = circleOf(req);
+    if (result.lucidity) {
+      sharedLucidityAlert.set(circle, { active: true, at: Date.now() });
+      console.info(`[Yadira CALL-E] lucidity on call ${result.runId} — caregiver alerted.`);
+    }
+    if (result.needsCaregiver && !result.lucidity) {
+      sharedCaregiverAlert.set(circle, { active: true, at: Date.now() });
+      console.info(`[Yadira CALL-E] distress on call ${result.runId} — caregiver alerted.`);
+    }
+
+    res.json({ ok: true, dryRun: isCalleDryRun(), ...result });
+  } catch (err: any) {
+    // The message is already safe to show — the CALL-E client strips provider
+    // stderr, which can carry login URLs.
+    console.warn('[Yadira CALL-E] check-in call failed:', err?.message || err);
+    res.status(502).json({ error: err?.message || 'The check-in call could not be placed.' });
+  }
 });
 
 // Aurora — intentional visual dissociation screen (caregiver or patient triggered).

@@ -410,6 +410,61 @@ function AppContent() {
   // conversation (see runReflection), read into every chat prompt. This is
   // what separates Yadira from tools that forget the people who forget.
   const [personaFile, setPersonaFile] = useStoreDoc<PersonaFile>('personaFile', DEFAULT_PERSONA_FILE);
+
+  // ---- Check-in calls (CALL-E) ----
+  // Yadira on the telephone, for the days the tablet is too much. The number
+  // lives in the care circle so both caregiver devices see the same one; the
+  // last readout is kept so the caregiver can see how the last call went
+  // without hunting for it.
+  const [checkInCall, setCheckInCall] = useStoreDoc<{
+    phone?: string;
+    lastSummary?: string;
+    lastAt?: number;
+    lastNeededCaregiver?: boolean;
+  }>('checkInCall', {});
+  const [callingNow, setCallingNow] = useState(false);
+
+  const placeCheckInCall = async () => {
+    const phone = (checkInCall.phone || '').trim();
+    if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+      toastError('Check the number', 'Use the full international form, e.g. +15551234567.');
+      return;
+    }
+    setCallingNow(true);
+    try {
+      const res = await fetch('/api/calls/check-in', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          toPhone: phone,
+          patientName: profile.patientName,
+          caregiverName: profile.caregiverName,
+          threadToPickUp: personaFile.threadToPickUp || undefined,
+          memoryHints: memories.slice(0, 3).map((m) => `${m.title} — ${m.description}`),
+          // Never inferred server-side: the patient's own timezone decides
+          // whether it is a reasonable hour to ring them.
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      setCheckInCall({
+        ...checkInCall,
+        lastSummary: data.summary,
+        lastAt: Date.now(),
+        lastNeededCaregiver: !!data.needsCaregiver,
+      });
+      if (data.needsCaregiver) {
+        toastError('That call needs you', data.summary);
+      } else {
+        toastSuccess(data.dryRun ? 'Dry run complete' : 'Call finished', data.summary);
+      }
+    } catch (err: any) {
+      toastError('The call could not be placed', err?.message || 'Please try again.');
+    } finally {
+      setCallingNow(false);
+    }
+  };
   const personaFileRef = useRef(personaFile);
   personaFileRef.current = personaFile;
 
@@ -3282,6 +3337,54 @@ function AppContent() {
                       </span>
                     </div>
                   </button>
+
+                  {/* Check-in call — Yadira rings the patient's own phone.
+                      For the many people who cannot work a tablet but will
+                      still answer a telephone. One call per press; nothing
+                      recurring is created here. */}
+                  <div className="p-4 rounded-2xl border border-[#CEDFCF] bg-[#F2FAF4] flex flex-col">
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-[#2C2C2A] flex items-center gap-1.5">
+                      <Phone className="w-3.5 h-3.5 text-[#3A5D45]" /> Check-in call
+                    </span>
+                    <span className="text-[10px] text-[#5E5D57] leading-tight mt-1 block">
+                      Yadira phones {profile.patientName || 'them'} for a short, warm hello and tells you how they
+                      sounded. She gives no medical advice, and anything worrying reaches you straight away.
+                    </span>
+                    <label className="sr-only" htmlFor="check-in-phone">
+                      Phone number to call, in full international form
+                    </label>
+                    <input
+                      id="check-in-phone"
+                      type="tel"
+                      inputMode="tel"
+                      value={checkInCall.phone || ''}
+                      onChange={(e) => setCheckInCall({ ...checkInCall, phone: e.target.value })}
+                      placeholder="+15551234567"
+                      className="mt-2.5 w-full text-sm px-3 py-2 rounded-xl border border-[#E3DFC2] bg-white focus:outline-none focus:ring-2 focus:ring-[#3A5D45]/20"
+                    />
+                    <button
+                      type="button"
+                      id="btn-check-in-call"
+                      onClick={placeCheckInCall}
+                      disabled={callingNow}
+                      className="mt-2 w-full flex items-center justify-center gap-2 text-sm font-bold px-3 py-2.5 rounded-xl bg-[#3A5D45] text-white disabled:opacity-60 hover:bg-[#2F4C39] transition-colors"
+                    >
+                      {callingNow ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Phone className="w-4 h-4" />}
+                      {callingNow ? 'Calling…' : 'Call now'}
+                    </button>
+                    {checkInCall.lastSummary && (
+                      <div
+                        className={`mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border ${
+                          checkInCall.lastNeededCaregiver
+                            ? 'border-rose-200 bg-rose-50 text-rose-800'
+                            : 'border-[#E3DFC2] bg-white text-[#5E5D57]'
+                        }`}
+                      >
+                        <b className="block mb-0.5">Last call</b>
+                        {checkInCall.lastSummary}
+                      </div>
+                    )}
+                  </div>
 
                   {/* Caregiver Pro — the whole companion is free; only the
                       caregiver's AI care reports are the paid tier. */}
