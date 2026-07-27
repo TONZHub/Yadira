@@ -27,9 +27,27 @@ const req: HelpCallRequest = {
 describe('what the caregiver hears', () => {
   const goal = buildHelpCallGoal(req);
 
-  test('leads with the fact, rather than building up to it', () => {
-    assert.match(goal, /do not build up to it/i);
-    assert.match(goal, /pressed the help button/);
+  test('CONFIRMS WHO IS THERE BEFORE DISCLOSING ANYTHING', () => {
+    // The ordering is the whole design. A phone number will eventually be
+    // answered by a neighbour, a child, or a stranger with a recycled number,
+    // and this call names a vulnerable person and says they asked for help.
+    const askIdentity = goal.indexOf('Am I speaking with');
+    const nameThePatient = goal.indexOf('Eleanor has pressed');
+    assert.ok(askIdentity > -1, 'the call must ask who it is speaking to');
+    assert.ok(nameThePatient > -1, 'the call must eventually deliver the message');
+    assert.ok(askIdentity < nameThePatient, 'identity must be confirmed BEFORE the patient is named');
+  });
+
+  test('a wrong number is told nothing at all', () => {
+    assert.match(goal, /Do NOT say why you are calling/);
+    assert.match(goal, /Do NOT name anyone/);
+    assert.match(goal, /learns only that somebody called/);
+  });
+
+  test('does not ask a stranger to pass the message on', () => {
+    // The previous version did exactly this, which is a disclosure with extra
+    // steps.
+    assert.match(goal, /Do NOT ask them to pass on a message/);
   });
 
   test('names the patient and the caregiver', () => {
@@ -37,18 +55,23 @@ describe('what the caregiver hears', () => {
     assert.match(goal, /Thomas/);
   });
 
-  test('includes when it happened', () => {
-    // Rendered in the server's locale; just assert a time is present.
-    assert.match(goal, /at \d{1,2}:\d{2}/);
+  test('asks them to go to the patient', () => {
+    assert.match(goal, /Please go to them/);
+  });
+
+  test('a voicemail names nobody — it can be played aloud to a room', () => {
+    const vm = goal.slice(goal.indexOf('voicemail'));
+    assert.match(vm, /do not name Eleanor/i);
+    assert.match(vm, /alert waiting in your Yadira app/);
   });
 
   test('forbids speculating about why', () => {
     assert.match(goal, /must not speculate/i);
-    assert.match(goal, /Say nothing further about their health/i);
+    assert.match(goal, /Say nothing about their health/i);
   });
 
-  test('asks for confirmation that someone is going', () => {
-    assert.match(goal, /confirm they have heard and are going/i);
+  test('asks for confirmation that they heard', () => {
+    assert.match(goal, /confirm they have heard you/i);
   });
 
   test('tells the caller not to sound alarmed', () => {
@@ -56,9 +79,13 @@ describe('what the caregiver hears', () => {
     assert.match(goal, /Do not sound alarmed/i);
   });
 
-  test('handles voicemail and a stranger answering', () => {
-    assert.match(goal, /voicemail/i);
-    assert.match(goal, /someone other than the caregiver answers/i);
+  test('a stranger is handled by the identity gate, not by a later branch', () => {
+    // The old script delivered the message and only then asked who it was
+    // talking to. Nothing downstream can un-say that, so the gate is the
+    // handling.
+    assert.match(goal, /Am I speaking with/);
+    assert.match(goal, /or you are not certain/i);
+    assert.match(goal, /Sorry to have troubled you/);
   });
 
   test('works without a caregiver name', () => {

@@ -86,16 +86,38 @@ your in-app alert first, place the call alongside it.
 
 ## What The Call Says
 
-The whole message is: **who asked for you, and when.** Nothing else.
+**Confirm who is listening before you disclose anything.** This ordering is the
+design, not a nicety:
 
-- Lead with it. Do not build up to it.
+```
+"Hello, this is <product>. Am I speaking with <recipient>?"
+   ├─ no / unsure → "Sorry to have troubled you. Goodbye."  → hang up, say nothing
+   └─ yes         → "<subject> has pressed their help button and is asking for
+                     you. Please go to them when you can."  → confirm → hang up
+```
+
+The obvious design leads with the message to save a second. It is wrong. A
+number will eventually be answered by a neighbour, a partner, a child, or a
+stranger with a recycled number — and leading with the message tells them a
+named vulnerable person has asked for help before you know who is listening.
+Nothing downstream can un-say it, and a "if it's the wrong person, stop" branch
+fires only after the model has already spoken.
+
+After the gate:
+
 - Do not sound alarmed. Panic on the phone gets nobody there faster.
 - Do not speculate about *why*. You do not know, and a guess becomes what the
   responder believes on the drive over.
-- Say nothing about the subject's health, condition, or history — you cannot be
-  sure who picked up the phone.
-- Ask the recipient to confirm they have heard and are going.
+- Say nothing about the subject's health, condition, or history.
+- Never ask a stranger to pass the message on — that is a disclosure with extra
+  steps.
+- Ask the recipient to confirm they have heard.
+- **Voicemail names nobody.** It is the one case where the gate cannot run, so
+  the message must be safe for a whole room to overhear: no name, no reason,
+  just "there is an alert waiting in your app".
 - Keep it under a minute.
+
+Full template and the reasoning line by line: [`references/call-goal.md`](references/call-goal.md).
 
 ## Structured Result
 
