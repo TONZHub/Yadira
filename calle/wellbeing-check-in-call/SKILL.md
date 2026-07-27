@@ -119,6 +119,29 @@ These belong in the call goal itself, not only in the agent's head:
 - On voicemail: a short friendly message, no health information.
 - Keep the call under about four minutes and end warmly.
 
+## The Voice Is Not Yours
+
+CALL-E runs its own voice runtime. There is no parameter for supplying your
+product's own synthesized voice, and none for choosing a specific speaker. If
+your app already speaks to this person in a particular voice, **the phone will
+not sound like it.**
+
+For a companion product this matters more than it first appears. To someone
+whose recognition is failing, a familiar name in an unfamiliar voice is not the
+same person — voice is often the last thread of recognition to fray, and a
+mismatch on the phone can read as an impostor rather than a friend. Tell
+caregivers plainly that the phone voice differs from the in-app one, rather than
+letting them discover it on a call.
+
+The one lever you do have is `locale`, set from the recipient's region. **Send
+it.** With nothing set, CALL-E picks its own default, which is how a family in
+one country gets a companion with another country's accent. Ask the caregiver
+where the person is; do not infer it from the dialling code.
+
+This limitation is also why a represented-person mode must not go down the
+phone line. A generic voice claiming to be a named loved one is worse than no
+call at all.
+
 ## Structured Result
 
 The point of the call is the readout, not the transcript. Return at minimum

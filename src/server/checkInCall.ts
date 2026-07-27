@@ -27,6 +27,7 @@
 import { detectLucidity, type LucidityKind } from './lucidity';
 import { placeOneCall, maskPhone, isE164, type CallActivity, type CallStatus } from './calle';
 import { hasApiKey, placeCallAndWait, type CalleCallResult } from './calleApi';
+import { localeFor } from './calleRegions';
 
 export type CheckInMood = 'peaceful' | 'anxious' | 'restless' | 'sad';
 
@@ -76,7 +77,7 @@ export function buildCallGoal(req: CheckInCallRequest): string {
     `Open by saying who you are and why you are calling. ${req.patientName} may not remember the last call — that is fine, never point it out.`
   );
   lines.push(
-    'Speak in short sentences, one idea at a time, and leave generous silences. Let them set the pace. If they repeat themselves, answer with the same warmth as the first time.'
+    'Speak slowly and warmly, in short sentences, one idea at a time, and leave generous silences. Let them set the pace. A phone gives them no face to read, so an unhurried voice is most of the reassurance. If they repeat themselves, answer with the same warmth as the first time.'
   );
   lines.push(
     'Find out gently how they are feeling today and whether anything is worrying them. Ask about feelings, never test their memory, and never ask "do you remember".'
@@ -388,7 +389,9 @@ export async function placeCheckInCall(req: CheckInCallRequest): Promise<CheckIn
       task: goal,
       phone: req.toPhone,
       region: req.region,
-      locale: req.language,
+      // Without a locale CALL-E picks its own, which is how a US family got an
+      // English accent on the first live call.
+      locale: localeFor(req.region, req.language),
       recipientResultSchema: RECIPIENT_RESULT_SCHEMA as unknown as Record<string, any>,
       // One check-in per patient per minute is the most a retry should ever
       // produce — a duplicated request must not ring them twice.
