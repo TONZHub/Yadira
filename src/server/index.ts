@@ -15,9 +15,7 @@ import {
   escapeRegExp,
 } from './textSafety';
 import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity';
-import { placeCheckInCall } from './checkInCall';
 import { placeHelpCall, withinCooldown, markCalled } from './helpCall';
-import { isDryRun as isCalleDryRun } from './calle';
 
 dotenv.config();
 
@@ -151,8 +149,22 @@ app.post('/api/caregiver-alert', async (req, res) => {
   // connect must never surface to them as an error. Their screen has already
   // told them their caregiver has been told, which remains true — the in-app
   // alert is raised either way.
+  //
+  // Caregiver Pro only. Each call costs real money to place, and the free tier
+  // could not absorb it — but the in-app alert above is raised for EVERY
+  // family, paying or not, so nobody loses the help button itself. What Pro
+  // buys is the phone ringing as well as the screen lighting up.
+  //
+  // Note the trust model: `isPremium` comes from the client, like the rest of
+  // this app's premium gating (the circle's premium doc is client-written).
+  // Someone determined can bypass it. That is a known property of the existing
+  // design, not something introduced here — see the Stripe webhook work.
   const escalationPhone = String(req.body?.escalationPhone || '').trim();
-  if (active && escalationPhone) {
+  const isPremium = req.body?.isPremium === true;
+  if (active && escalationPhone && !isPremium) {
+    console.info('[Yadira CALL-E] help call skipped — circle is not on Caregiver Pro. The in-app alert still stands.');
+  }
+  if (active && escalationPhone && isPremium) {
     if (withinCooldown(circle)) {
       console.info('[Yadira CALL-E] help call suppressed — within cooldown for this circle.');
     } else {
@@ -193,50 +205,6 @@ app.post('/api/lucidity-alert', async (req, res) => {
   const state = { active, at: Date.now() };
   sharedLucidityAlert.set(circleOf(req), state);
   res.json({ ok: true, ...state });
-});
-
-// ---- Check-in calls (CALL-E) -------------------------------------------
-// Yadira on the telephone, for the many people who cannot work a tablet but
-// will still answer a ringing phone. One call per request; recurrence belongs
-// to the caregiver's own scheduler, never to a provider-side schedule.
-//
-// The result is not just logged — a call that surfaced distress or a window of
-// clarity raises the SAME alerts the tablet raises, because nobody is in the
-// room to notice. A phone call is the surface where an unread result matters
-// most.
-app.post('/api/calls/check-in', async (req, res) => {
-  const { toPhone, patientName, caregiverName, threadToPickUp, memoryHints, timezone, language, region } =
-    req.body || {};
-
-  try {
-    const result = await placeCheckInCall({
-      toPhone: String(toPhone || '').trim(),
-      patientName: String(patientName || '').trim(),
-      caregiverName,
-      threadToPickUp,
-      memoryHints: Array.isArray(memoryHints) ? memoryHints.slice(0, 3).map(String) : undefined,
-      timezone: String(timezone || '').trim(),
-      language,
-      region,
-    });
-
-    const circle = circleOf(req);
-    if (result.lucidity) {
-      sharedLucidityAlert.set(circle, { active: true, at: Date.now() });
-      console.info(`[Yadira CALL-E] lucidity on call ${result.runId} — caregiver alerted.`);
-    }
-    if (result.needsCaregiver && !result.lucidity) {
-      sharedCaregiverAlert.set(circle, { active: true, at: Date.now() });
-      console.info(`[Yadira CALL-E] distress on call ${result.runId} — caregiver alerted.`);
-    }
-
-    res.json({ ok: true, dryRun: isCalleDryRun(), ...result });
-  } catch (err: any) {
-    // The message is already safe to show — the CALL-E client strips provider
-    // stderr, which can carry login URLs.
-    console.warn('[Yadira CALL-E] check-in call failed:', err?.message || err);
-    res.status(502).json({ error: err?.message || 'The check-in call could not be placed.' });
-  }
 });
 
 // Aurora — intentional visual dissociation screen (caregiver or patient triggered).
