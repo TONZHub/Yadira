@@ -6,7 +6,7 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { isE164, maskPhone, inspectPlan, pickField, type CallPlan, type CallStatus } from './calle';
+import { isE164, maskPhone, inspectPlan, pickField, resolveCliCommand, type CallPlan, type CallStatus } from './calle';
 import { buildCallGoal, readMood, readDistress, summariseCall, type CheckInCallRequest } from './checkInCall';
 
 const req: CheckInCallRequest = {
@@ -69,6 +69,79 @@ describe('inspectPlan — the gate before dialling', () => {
     const verdict = inspectPlan(plan([]), '+15551234567');
     assert.equal(verdict.ok, true);
     assert.match(verdict.reason, /did not echo/);
+  });
+});
+
+describe('resolving the CALL-E CLI', () => {
+  // The server used to depend on a GLOBAL install and nothing else, so it
+  // worked on the laptop where someone ran `npm install -g` and died with
+  // ENOENT on every fresh deploy. @call-e/cli is a project dependency now.
+  const saved = { cmd: process.env.CALLE_CLI_COMMAND, path: process.env.CALLE_CLI_PATH };
+  const clear = () => {
+    delete process.env.CALLE_CLI_COMMAND;
+    delete process.env.CALLE_CLI_PATH;
+  };
+  const restore = () => {
+    if (saved.cmd === undefined) delete process.env.CALLE_CLI_COMMAND;
+    else process.env.CALLE_CLI_COMMAND = saved.cmd;
+    if (saved.path === undefined) delete process.env.CALLE_CLI_PATH;
+    else process.env.CALLE_CLI_PATH = saved.path;
+  };
+
+  test('an explicit command wins over everything', () => {
+    clear();
+    process.env.CALLE_CLI_COMMAND = 'npx -y @call-e/cli@0.3.6';
+    assert.deepEqual(resolveCliCommand(), ['npx', '-y', '@call-e/cli@0.3.6']);
+    restore();
+  });
+
+  test('CALLE_CLI_PATH runs a repository-local checkout through node', () => {
+    clear();
+    process.env.CALLE_CLI_PATH = '/srv/call-e/packages/cli/bin/calle.js';
+    assert.deepEqual(resolveCliCommand(), ['node', '/srv/call-e/packages/cli/bin/calle.js']);
+    restore();
+  });
+
+  test('with no overrides it finds the installed dependency, not a global', () => {
+    clear();
+    const resolved = resolveCliCommand();
+    restore();
+    // node_modules/.bin/calle exists in this repo because @call-e/cli is a
+    // dependency. If this ever falls back to a bare "calle", a deploy that
+    // only ran `npm ci` has no CLI at all.
+    assert.equal(resolved.length, 1);
+    assert.match(resolved[0], /node_modules[\\/]\.bin[\\/]calle$/);
+  });
+});
+
+describe('the real @call-e/cli auth status payload', () => {
+  // Captured from `calle auth status` against @call-e/cli, so a field rename
+  // upstream fails here rather than at the moment someone needs a call placed.
+  const signedOut = {
+    server_url: 'https://example.test/mcp/openagent_oauth',
+    cache_path: '/root/.calle-mcp/cli/abc/token.json',
+    cache_exists: false,
+    pending_exists: false,
+    usable: false,
+    expires_at: null,
+    pending_status: null,
+    pending_login_url: null,
+  };
+
+  test('"usable" is the field that decides authorization', () => {
+    assert.equal(pickField(signedOut, ['usable', 'is_usable']), false);
+    assert.equal(pickField({ ...signedOut, usable: true }, ['usable']), true);
+  });
+
+  test('a never-logged-in machine is distinguishable from an expired token', () => {
+    assert.equal(pickField(signedOut, ['cache_exists']), false);
+    assert.equal(pickField({ ...signedOut, cache_exists: true, expires_at: '2026-01-01T00:00:00Z' }, ['expires_at']), '2026-01-01T00:00:00Z');
+  });
+
+  test('a null field is skipped so the fallback chain keeps looking', () => {
+    // expires_at is null when nobody has ever logged in; treating that as a
+    // present value would stop the search at a field that says nothing.
+    assert.equal(pickField(signedOut, ['expires_at', 'cache_path']), '/root/.calle-mcp/cli/abc/token.json');
   });
 });
 

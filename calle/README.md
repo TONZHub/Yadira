@@ -46,15 +46,48 @@ because on a phone call nobody is in the room to notice.
 
 ## Real calls
 
-1. Install the CALL-E CLI and sign in (`calle auth login`). The account comes
-   with 20 free calls.
-2. Leave `CALLE_DRY_RUN` unset.
-3. Point the app at the CLI if it isn't on `PATH`:
+`@call-e/cli` is a **project dependency**, so `npm install` provides it and the
+server finds it at `node_modules/.bin/calle`. Nothing needs installing globally
+— that was the original design and it meant a fresh deploy, which only runs
+`npm ci`, had no CLI at all.
+
+You still have to log in once on the machine that will place calls, because the
+token is cached per machine (`~/.calle-mcp/cli`):
+
+```bash
+# Attribution env vars; they carry no user data.
+env CALLE_SOURCE=yadira CALLE_INTEGRATION=yadira-check-in-call CALLE_INTEGRATION_VERSION=0.1.0 \
+  ./node_modules/.bin/calle auth login     # finish authorization in the browser
+
+env CALLE_SOURCE=yadira CALLE_INTEGRATION=yadira-check-in-call CALLE_INTEGRATION_VERSION=0.1.0 \
+  ./node_modules/.bin/calle auth status    # expect "usable": true
+```
+
+On a host with no browser, `calle auth login --start-only --no-browser-open`
+prints the authorization URL to open elsewhere, then re-run
+`calle auth login --no-browser-open` to finish the pending login.
+
+Then leave `CALLE_DRY_RUN` unset and the app places real calls. Until a token
+exists the route refuses cleanly and dials nothing:
+
+```json
+{ "error": "CALL-E is not authorized (no CALL-E login on this machine). Run: calle auth login" }
+```
+
+### Resolution order
+
+1. `CALLE_CLI_COMMAND` — explicit override.
+2. `CALLE_CLI_PATH` — a repository-local checkout, run through `node`.
+3. `node_modules/.bin/calle` — the project dependency. **This is the normal path.**
+4. `calle` on `PATH` — a global install, if someone has one.
+
+If none resolve, the route says so and names what it looked at rather than
+failing with a bare ENOENT.
 
 | Variable | Purpose |
 | --- | --- |
 | `CALLE_DRY_RUN` | `1` to place no real calls. Unset for live calls. |
-| `CALLE_CLI_COMMAND` | Explicit CLI command, e.g. `npx -y @call-e/cli@1.2.3`. Overrides everything. |
+| `CALLE_CLI_COMMAND` | Explicit CLI command, e.g. `npx -y @call-e/cli@0.3.6`. Overrides everything. |
 | `CALLE_CLI_PATH` | Path to a repository-local `packages/cli/bin/calle.js`. |
 | `CALLE_TIMEOUT_MS` | Per-command timeout. Default 45000. |
 | `CALLE_DRY_RUN_TRANSCRIPT` | Scripted dry-run transcript, `speaker: text` per line. |

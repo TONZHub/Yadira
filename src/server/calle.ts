@@ -26,6 +26,8 @@
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import fs from 'fs';
+import path from 'path';
 
 const execFileAsync = promisify(execFile);
 
@@ -58,10 +60,32 @@ export function isDryRun(): boolean {
 }
 
 /**
+ * Where a project-installed `@call-e/cli` puts its binary. Probed rather than
+ * assumed because __dirname is the project root under tsx in development and
+ * dist/ in the bundled production build.
+ */
+function localBinCandidates(): string[] {
+  const roots = [process.cwd()];
+  if (typeof __dirname !== 'undefined') {
+    roots.push(path.resolve(__dirname, '..'), path.resolve(__dirname, '../..'));
+  }
+  return roots.map((root) => path.join(root, 'node_modules', '.bin', 'calle'));
+}
+
+/**
  * Resolve the CALL-E CLI, following the documented resolver order:
  *   1. CALLE_CLI_COMMAND — an explicit override (space-separated).
- *   2. A repository-local checkout of the CLI package.
- *   3. A `calle` binary already on PATH.
+ *   2. CALLE_CLI_PATH — a repository-local checkout of the CLI package.
+ *   3. node_modules/.bin/calle — the project dependency.
+ *   4. A `calle` binary already on PATH (a global install).
+ *
+ * Step 3 exists because the server used to depend on a GLOBAL install and
+ * nothing else. That works on the laptop where somebody ran `npm install -g`
+ * and fails everywhere else — a fresh deploy runs `npm ci`, which has no
+ * reason to know about it, and the first check-in call dies with ENOENT.
+ * `@call-e/cli` is a project dependency now, so this path resolves without
+ * anyone installing anything by hand.
+ *
  * The pinned-npx fallback is deliberately NOT attempted: it needs a known
  * version, and the bootstrap reference forbids resolving it to `latest`. Set
  * CALLE_CLI_COMMAND if you want the npx route.
@@ -69,9 +93,30 @@ export function isDryRun(): boolean {
 export function resolveCliCommand(): string[] {
   const override = (process.env.CALLE_CLI_COMMAND || '').trim();
   if (override) return override.split(/\s+/);
+
   const local = (process.env.CALLE_CLI_PATH || '').trim();
   if (local) return ['node', local];
+
+  for (const candidate of localBinCandidates()) {
+    try {
+      if (fs.existsSync(candidate)) return [candidate];
+    } catch {
+      /* unreadable path — try the next one */
+    }
+  }
+
   return ['calle'];
+}
+
+/** Everything the resolver looked at, for an error a reader can act on. */
+function describeResolution(): string {
+  const tried = [
+    process.env.CALLE_CLI_COMMAND ? 'CALLE_CLI_COMMAND' : null,
+    process.env.CALLE_CLI_PATH ? 'CALLE_CLI_PATH' : null,
+    'node_modules/.bin/calle',
+    'calle on PATH',
+  ].filter(Boolean);
+  return tried.join(', ');
 }
 
 // ---------------------------------------------------------------- helpers
@@ -123,9 +168,14 @@ async function calleJson(args: string[], step: string): Promise<any> {
     stdout = result.stdout;
   } catch (err: any) {
     // Never surface raw stderr to a caller: it can carry a login URL.
-    const detail = String(err?.code === 'ENOENT' ? 'CALL-E CLI not found on PATH' : err?.message || err)
-      .split('\n')[0]
-      .slice(0, 200);
+    if (err?.code === 'ENOENT') {
+      throw new CalleError(
+        `the CALL-E CLI could not be found (looked at: ${describeResolution()}). ` +
+          `Run "npm install" so the @call-e/cli dependency is present, or set CALLE_CLI_COMMAND.`,
+        step
+      );
+    }
+    const detail = String(err?.message || err).split('\n')[0].slice(0, 200);
     throw new CalleError(`CALL-E ${step} failed: ${detail}`, step);
   }
 
@@ -146,13 +196,32 @@ export interface CallPlan {
   raw: any;
 }
 
+/**
+ * Verified against `@call-e/cli`, which answers with:
+ *   { server_url, cache_path, cache_exists, pending_exists, usable,
+ *     expires_at, pending_status, pending_login_url }
+ * `usable` is the field that decides it. The others turn "not authorized" into
+ * something the caregiver's log can act on — never logged in on this machine is
+ * a different problem from a token that has aged out.
+ */
 export async function authStatus(): Promise<{ authorized: boolean; detail?: string }> {
   if (isDryRun()) return { authorized: true, detail: 'dry-run' };
   const payload = await calleJson(['auth', 'status'], 'auth status');
-  const token = pickField(payload, ['token', 'has_token', 'hasToken', 'authorized', 'valid']);
+
   const usable = pickField(payload, ['usable', 'is_usable', 'isUsable']);
-  const authorized = Boolean(usable ?? token);
-  return { authorized, detail: authorized ? undefined : 'no usable CALL-E token' };
+  const fallback = pickField(payload, ['token', 'has_token', 'hasToken', 'authorized', 'valid']);
+  if (Boolean(usable ?? fallback)) return { authorized: true };
+
+  const cacheExists = pickField(payload, ['cache_exists', 'cacheExists']);
+  const expiresAt = pickField(payload, ['expires_at', 'expiresAt']);
+  const detail =
+    cacheExists === false
+      ? 'no CALL-E login on this machine'
+      : expiresAt
+        ? `the CALL-E token expired at ${expiresAt}`
+        : 'no usable CALL-E token';
+  // The login URL is deliberately not echoed — it is a credential.
+  return { authorized: false, detail };
 }
 
 export async function planCall(opts: {
