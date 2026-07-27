@@ -149,8 +149,22 @@ app.post('/api/caregiver-alert', async (req, res) => {
   // connect must never surface to them as an error. Their screen has already
   // told them their caregiver has been told, which remains true — the in-app
   // alert is raised either way.
+  //
+  // Caregiver Pro only. Each call costs real money to place, and the free tier
+  // could not absorb it — but the in-app alert above is raised for EVERY
+  // family, paying or not, so nobody loses the help button itself. What Pro
+  // buys is the phone ringing as well as the screen lighting up.
+  //
+  // Note the trust model: `isPremium` comes from the client, like the rest of
+  // this app's premium gating (the circle's premium doc is client-written).
+  // Someone determined can bypass it. That is a known property of the existing
+  // design, not something introduced here — see the Stripe webhook work.
   const escalationPhone = String(req.body?.escalationPhone || '').trim();
-  if (active && escalationPhone) {
+  const isPremium = req.body?.isPremium === true;
+  if (active && escalationPhone && !isPremium) {
+    console.info('[Yadira CALL-E] help call skipped — circle is not on Caregiver Pro. The in-app alert still stands.');
+  }
+  if (active && escalationPhone && isPremium) {
     if (withinCooldown(circle)) {
       console.info('[Yadira CALL-E] help call suppressed — within cooldown for this circle.');
     } else {

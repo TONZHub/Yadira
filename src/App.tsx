@@ -915,6 +915,8 @@ function AppContent() {
         patientName: profile.patientName,
         caregiverName: profile.caregiverName,
         region: helpCall.region || undefined,
+        // Caregiver Pro gates the phone call, never the alert itself.
+        isPremium,
       }),
     }).catch((err) => console.warn('[Yadira] caregiver-alert push failed', err));
   };
@@ -3322,8 +3324,17 @@ function AppContent() {
                       caregiver knows exactly what the call is, so here it
                       costs nothing and gains everything. */}
                   <div className="p-4 rounded-2xl border border-rose-200 bg-rose-50/40 flex flex-col">
-                    <span className="text-xs font-extrabold uppercase tracking-wider text-[#2C2C2A] flex items-center gap-1.5">
-                      <Phone className="w-3.5 h-3.5 text-rose-500" /> Call me when they need me
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-[#2C2C2A] flex items-center justify-between gap-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <Phone className="w-3.5 h-3.5 text-rose-500" /> Call me when they need me
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${
+                          isPremium ? 'bg-[#3A5D45] text-white' : 'bg-[#EAE8DD] text-[#7E7D76]'
+                        }`}
+                      >
+                        {isPremium ? 'Pro' : 'Pro only'}
+                      </span>
                     </span>
                     <span className="text-[10px] text-[#5E5D57] leading-tight mt-1 block">
                       When {profile.patientName || 'they'} press the help button, Yadira raises the alert here{' '}
@@ -3364,6 +3375,14 @@ function AppContent() {
                       The call says only that {profile.patientName || 'they'} asked for you, and when. It never
                       discusses their health, and repeated presses will not ring you over and over.
                     </span>
+                    {!isPremium && (
+                      <div className="mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border border-[#E3DFC2] bg-[#FCFAF5] text-[#5E5D57]">
+                        <b className="block mb-0.5">The alert is free. The phone call is Caregiver Pro.</b>
+                        {profile.patientName || 'Their'} help button still reaches you here the moment it is
+                        pressed — that never costs anything. Pro ($5/week) adds the phone ringing too, for the times
+                        you are not looking at a screen.
+                      </div>
+                    )}
                   </div>
 
                   {/* Caregiver Pro — the whole companion is free; only the
@@ -3376,8 +3395,8 @@ function AppContent() {
                         </span>
                         <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
                           {isPremium
-                            ? `Active — unlimited AI care reports (routines & clinical insights) for this caregiver. The companion itself is free for your family, always.`
-                            : `The companion is free for your family — ${representedPersona || 'the loved one'}'s natural voice, Call Mode, Session Memory, calming rooms, and photos, always. Caregiver Pro ($5/week) adds unlimited AI care reports; free includes one routine + one insights report each week. Run a care facility? Email partnerships@yadira.chat about a per-unit partnership.`}
+                            ? `Active — the help button rings your phone, plus unlimited AI care reports (routines & clinical insights) for this caregiver. The companion itself is free for your family, always.`
+                            : `The companion is free for your family — ${representedPersona || 'the loved one'}'s natural voice, Call Mode, Session Memory, calming rooms, and photos, always. Caregiver Pro ($5/week) makes the help button ring your phone as well as the screen, and adds unlimited AI care reports; free includes one routine + one insights report each week. Run a care facility? Email partnerships@yadira.chat about a per-unit partnership.`}
                         </span>
                       </div>
                       <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${isPremium ? 'bg-[#3A5D45] text-white' : 'bg-[#EAE8DD] text-[#7E7D76]'}`}>
