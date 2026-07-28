@@ -8,6 +8,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildHelpCallGoal,
+  buildTestCallGoal,
   withinCooldown,
   markCalled,
   __resetCooldowns,
@@ -161,5 +162,40 @@ describe('it refuses to place a call it should not', () => {
       if (saved === undefined) delete process.env.CALLE_API_KEY;
       else process.env.CALLE_API_KEY = saved;
     }
+  });
+});
+
+describe('the test call is unmistakably a test', () => {
+  const goal = buildTestCallGoal(req);
+
+  test('says nothing is wrong, early and plainly', () => {
+    // A caregiver who hears "Eleanor pressed the help button" as a drill will
+    // either panic, or learn that these calls are sometimes not real. The
+    // second is worse: this feature cannot afford a caregiver who hesitates.
+    assert.match(goal, /This is only a test/);
+    assert.match(goal, /nothing is wrong/i);
+    const reassure = goal.indexOf('This is only a test');
+    const explain = goal.indexOf('If they ever press the help button');
+    assert.ok(reassure < explain, 'reassurance must come before the explanation');
+  });
+
+  test('never claims the patient pressed anything', () => {
+    assert.match(goal, /Never say they pressed anything/);
+    assert.doesNotMatch(goal, /Eleanor has pressed/);
+  });
+
+  test('still gates on identity before saying anything', () => {
+    const ask = goal.indexOf('Am I speaking with');
+    const anythingElse = goal.indexOf('This is only a test');
+    assert.ok(ask > -1 && ask < anythingElse);
+  });
+
+  test('tells them to save the number, which is the point of testing', () => {
+    assert.match(goal, /worth saving as a contact/);
+    assert.match(goal, /not silenced as an unknown number/);
+  });
+
+  test('is explicitly not to be delivered in an alarmed tone', () => {
+    assert.match(goal, /not an urgent one/i);
   });
 });

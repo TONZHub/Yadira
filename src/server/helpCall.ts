@@ -113,9 +113,82 @@ export function markCalled(circle: string, now = Date.now()): void {
 /** Test seam — the cooldown is process-wide state. */
 export function __resetCooldowns(): void {
   lastCallAt.clear();
+  lastOutcome.clear();
 }
 
-export async function placeHelpCall(req: HelpCallRequest): Promise<HelpCallResult> {
+// ---------------------------------------------------------------- outcomes
+//
+// The call is fire-and-forget so the patient never waits on a phone network,
+// and every way it can decline to ring is silent by design. That is right for
+// the patient and wrong for the caregiver, who is the one person who needs to
+// know their phone is not going to ring. Record what happened, per circle, so
+// the settings card can say so in a sentence instead of leaving them to guess.
+
+export type HelpCallStatus =
+  | 'placed'
+  | 'no_number'
+  | 'not_premium'
+  | 'cooldown'
+  | 'failed';
+
+export interface HelpCallOutcome {
+  status: HelpCallStatus;
+  /** One sentence a caregiver can act on. Never contains a full number. */
+  detail: string;
+  at: number;
+}
+
+const lastOutcome = new Map<string, HelpCallOutcome>();
+
+export function recordOutcome(circle: string, status: HelpCallStatus, detail: string): void {
+  lastOutcome.set(circle, { status, detail, at: Date.now() });
+}
+
+export function getOutcome(circle: string): HelpCallOutcome | null {
+  return lastOutcome.get(circle) ?? null;
+}
+
+/** How long until this circle can trigger another call, in ms. 0 when ready. */
+export function cooldownRemaining(circle: string, now = Date.now()): number {
+  const last = lastCallAt.get(circle);
+  if (last === undefined) return 0;
+  return Math.max(0, COOLDOWN_MS - (now - last));
+}
+
+/**
+ * The same call, declared as a test.
+ *
+ * A test call must be unmistakably a test within its first breath. A caregiver
+ * who hears "Eleanor pressed the help button" as a drill will either panic or —
+ * far worse in the long run — learn that these calls are sometimes not real.
+ * The one thing this feature cannot afford is a caregiver who hesitates because
+ * the last one was a test.
+ */
+export function buildTestCallGoal(req: HelpCallRequest): string {
+  const caregiver = req.caregiverName || 'the caregiver';
+  return [
+    `Call ${caregiver} to run a test of their alert system. Nothing is wrong. Say so early and clearly.`,
+    '',
+    'Follow these steps in order:',
+    `1. Open with exactly this: "Hello, this is Yadira. Am I speaking with ${caregiver}?"`,
+    `2. If they say no, or you are not certain it is ${caregiver}: say only "Sorry to have troubled you. Goodbye," and end the call. Say nothing else and name nobody.`,
+    `3. Once they confirm, say immediately: "This is only a test — nothing is wrong, and ${req.patientName} is fine. You asked to hear what a help-button call sounds like."`,
+    '4. Then say: "If they ever press the help button, I will call you like this and tell you they are asking for you."',
+    '5. Tell them this number is worth saving as a contact, so a real call is not silenced as an unknown number.',
+    '6. Thank them and end the call.',
+    '',
+    'Throughout:',
+    'Sound calm and ordinary. This is a reassuring call, not an urgent one — do not use an alarmed tone at any point.',
+    `Never suggest anything is wrong with ${req.patientName}. Never say they pressed anything.`,
+    'If the call reaches voicemail, leave only: "This is Yadira. That was a test of your alert calls, and nothing is wrong."',
+    'Keep the whole call under a minute.',
+  ].join('\n');
+}
+
+export async function placeHelpCall(
+  req: HelpCallRequest,
+  opts: { test?: boolean } = {}
+): Promise<HelpCallResult> {
   if (!isE164(req.toPhone)) {
     throw new Error("The caregiver's phone number must be in E.164 format (e.g. +15551234567).");
   }
@@ -124,15 +197,15 @@ export async function placeHelpCall(req: HelpCallRequest): Promise<HelpCallResul
   }
 
   const result = await placeCallAndWait({
-    task: buildHelpCallGoal(req),
+    task: opts.test ? buildTestCallGoal(req) : buildHelpCallGoal(req),
     phone: req.toPhone,
     region: req.region,
     locale: localeFor(req.region, req.language),
     recipientResultSchema: HELP_RESULT_SCHEMA as unknown as Record<string, any>,
     // One press is one call: a retried request inside the same minute must not
     // ring the caregiver twice.
-    idempotencyKey: `yadira-help-${req.toPhone}-${Math.floor(req.at / 60_000)}`,
-    metadata: { product: 'yadira', workflow: 'help-button' },
+    idempotencyKey: `yadira-${opts.test ? 'test' : 'help'}-${req.toPhone}-${Math.floor(req.at / 60_000)}`,
+    metadata: { product: 'yadira', workflow: opts.test ? 'help-button-test' : 'help-button' },
     // A help call that is still ringing after four minutes has failed at its
     // job; stop waiting and let the caller log it.
     maxWaitMs: 4 * 60_000,
@@ -143,6 +216,20 @@ export async function placeHelpCall(req: HelpCallRequest): Promise<HelpCallResul
   const reachedWho = String(structured.reached || '');
   const reached = reachedWho ? reachedWho === 'caregiver' : result.turns.some((t) => String(t.speaker).includes('user'));
   const acknowledged = String(structured.acknowledged || '') === 'yes';
+
+  if (opts.test) {
+    return {
+      callId: result.callId,
+      reached,
+      acknowledged,
+      phone: maskPhone(req.toPhone),
+      summary: reached
+        ? 'Test call answered — this is how a real one will reach you.'
+        : reachedWho === 'voicemail'
+          ? 'Test call went to voicemail. A real one would too, so keep the app to hand.'
+          : 'Test call was not answered. Worth checking the number, and whether unknown callers are silenced.',
+    };
+  }
 
   const summary = reached
     ? acknowledged

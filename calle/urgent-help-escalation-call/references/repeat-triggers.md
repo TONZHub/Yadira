@@ -37,8 +37,18 @@ very different from a family of one.
 
 ## What suppression must not mean
 
-**It is not silence.** The in-app alert still fires on every press. Only the
-*call* is suppressed, because the call has already been made.
+**It is not silence — least of all towards the person who pressed.** Someone
+frightened presses a button repeatedly precisely because they are not sure it
+worked, and that is the moment they most need an answer. Suppressing the *call*
+is right; suppressing the *response to them* is the opposite of what the button
+is for.
+
+Answer every press, and say something different the second time: not "alert
+already raised", but "they already know, and they're on their way". The
+suppression is an implementation detail they should never encounter.
+
+**The in-app alert still fires on every press.** Only the *call* is suppressed,
+because the call has already been made.
 
 **It is not invisible.** Log every suppression with the subject and the time. A
 run of suppressed triggers is a person pressing a button over and over, which is
