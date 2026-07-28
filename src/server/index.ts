@@ -15,7 +15,14 @@ import {
   escapeRegExp,
 } from './textSafety';
 import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity';
-import { placeHelpCall, withinCooldown, markCalled } from './helpCall';
+import {
+  placeHelpCall,
+  withinCooldown,
+  markCalled,
+  recordOutcome,
+  getOutcome,
+  cooldownRemaining,
+} from './helpCall';
 
 dotenv.config();
 
@@ -159,16 +166,33 @@ app.post('/api/caregiver-alert', async (req, res) => {
   // this app's premium gating (the circle's premium doc is client-written).
   // Someone determined can bypass it. That is a known property of the existing
   // design, not something introduced here — see the Stripe webhook work.
+  // Every branch below records an outcome. The call is silent to the patient by
+  // design; it must not also be silent to the caregiver, who is the one person
+  // who needs to know whether their phone is going to ring.
   const escalationPhone = String(req.body?.escalationPhone || '').trim();
   const isPremium = req.body?.isPremium === true;
-  if (active && escalationPhone && !isPremium) {
-    console.info('[Yadira CALL-E] help call skipped — circle is not on Caregiver Pro. The in-app alert still stands.');
-  }
-  if (active && escalationPhone && isPremium) {
-    if (withinCooldown(circle)) {
+
+  if (active) {
+    if (!escalationPhone) {
+      recordOutcome(circle, 'no_number', 'No phone number saved, so there was nobody to call.');
+    } else if (!isPremium) {
+      recordOutcome(
+        circle,
+        'not_premium',
+        'The alert was raised, but the phone call needs Caregiver Pro.'
+      );
+      console.info('[Yadira CALL-E] help call skipped — circle is not on Caregiver Pro.');
+    } else if (withinCooldown(circle)) {
+      const mins = Math.ceil(cooldownRemaining(circle) / 60_000);
+      recordOutcome(
+        circle,
+        'cooldown',
+        `Already called you recently, so this press did not ring again. Ready in about ${mins} minute${mins === 1 ? '' : 's'}.`
+      );
       console.info('[Yadira CALL-E] help call suppressed — within cooldown for this circle.');
     } else {
       markCalled(circle);
+      recordOutcome(circle, 'placed', 'Calling you now. It usually takes a minute or two to ring.');
       void placeHelpCall({
         toPhone: escalationPhone,
         patientName: String(req.body?.patientName || 'Your loved one'),
@@ -176,8 +200,15 @@ app.post('/api/caregiver-alert', async (req, res) => {
         at: state.at,
         region: req.body?.region ? String(req.body.region) : undefined,
       })
-        .then((r) => console.info(`[Yadira CALL-E] help call ${r.callId}: ${r.summary}`))
-        .catch((err) => console.warn('[Yadira CALL-E] help call failed:', err?.message || err));
+        .then((r) => {
+          recordOutcome(circle, 'placed', r.summary);
+          console.info(`[Yadira CALL-E] help call ${r.callId}: ${r.summary}`);
+        })
+        .catch((err) => {
+          const detail = String(err?.message || err).slice(0, 200);
+          recordOutcome(circle, 'failed', `The call could not be placed: ${detail}`);
+          console.warn('[Yadira CALL-E] help call failed:', detail);
+        });
     }
   }
 
@@ -205,6 +236,13 @@ app.post('/api/lucidity-alert', async (req, res) => {
   const state = { active, at: Date.now() };
   sharedLucidityAlert.set(circleOf(req), state);
   res.json({ ok: true, ...state });
+});
+
+// What happened to the last help call for this circle — so "it isn't working"
+// becomes a sentence on the caregiver's screen rather than a server log nobody
+// reads. Same resilience rules as the alert routes it sits beside.
+app.get('/api/calls/help-status', async (req, res) => {
+  res.json(getOutcome(circleOf(req)) ?? { status: 'none', detail: '', at: 0 });
 });
 
 // Aurora — intentional visual dissociation screen (caregiver or patient triggered).

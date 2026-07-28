@@ -113,6 +113,46 @@ export function markCalled(circle: string, now = Date.now()): void {
 /** Test seam — the cooldown is process-wide state. */
 export function __resetCooldowns(): void {
   lastCallAt.clear();
+  lastOutcome.clear();
+}
+
+// ---------------------------------------------------------------- outcomes
+//
+// The call is fire-and-forget so the patient never waits on a phone network,
+// and every way it can decline to ring is silent by design. That is right for
+// the patient and wrong for the caregiver, who is the one person who needs to
+// know their phone is not going to ring. Record what happened, per circle, so
+// the settings card can say so in a sentence instead of leaving them to guess.
+
+export type HelpCallStatus =
+  | 'placed'
+  | 'no_number'
+  | 'not_premium'
+  | 'cooldown'
+  | 'failed';
+
+export interface HelpCallOutcome {
+  status: HelpCallStatus;
+  /** One sentence a caregiver can act on. Never contains a full number. */
+  detail: string;
+  at: number;
+}
+
+const lastOutcome = new Map<string, HelpCallOutcome>();
+
+export function recordOutcome(circle: string, status: HelpCallStatus, detail: string): void {
+  lastOutcome.set(circle, { status, detail, at: Date.now() });
+}
+
+export function getOutcome(circle: string): HelpCallOutcome | null {
+  return lastOutcome.get(circle) ?? null;
+}
+
+/** How long until this circle can trigger another call, in ms. 0 when ready. */
+export function cooldownRemaining(circle: string, now = Date.now()): number {
+  const last = lastCallAt.get(circle);
+  if (last === undefined) return 0;
+  return Math.max(0, COOLDOWN_MS - (now - last));
 }
 
 export async function placeHelpCall(req: HelpCallRequest): Promise<HelpCallResult> {

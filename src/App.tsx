@@ -431,6 +431,25 @@ function AppContent() {
     // patient calls — renaming it would silently drop a number a caregiver
     // has already saved.
   }>('checkInCall', {});
+
+  // Why the last help call did or did not ring. Every branch is silent to the
+  // patient by design; the caregiver is the one person who needs to know.
+  const [helpCallStatus, setHelpCallStatus] = useState<{ status: string; detail: string; at: number } | null>(null);
+  useEffect(() => {
+    if (isPatientSession) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/calls/help-status', { headers: authHeaders() });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (data?.status && data.status !== 'none') setHelpCallStatus(data);
+      } catch { /* best-effort */ }
+    };
+    poll();
+    const id = window.setInterval(poll, 5000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [isPatientSession]);
   const personaFileRef = useRef(personaFile);
   personaFileRef.current = personaFile;
 
@@ -3400,6 +3419,23 @@ function AppContent() {
                       an unfamiliar number — worth saving as a contact once you have seen it, so it is not
                       silenced at four in the morning.
                     </span>
+                    {helpCallStatus && (
+                      <div
+                        className={`mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border ${
+                          helpCallStatus.status === 'placed'
+                            ? 'border-[#CEDFCF] bg-[#F2FAF4] text-[#3A5D45]'
+                            : helpCallStatus.status === 'failed'
+                              ? 'border-rose-300 bg-rose-50 text-rose-800'
+                              : 'border-[#E3DFC2] bg-[#FCFAF5] text-[#5E5D57]'
+                        }`}
+                      >
+                        <b className="block mb-0.5">
+                          Last help press ·{' '}
+                          {new Date(helpCallStatus.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </b>
+                        {helpCallStatus.detail}
+                      </div>
+                    )}
                     {!isPremium && (
                       <div className="mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border border-[#E3DFC2] bg-[#FCFAF5] text-[#5E5D57]">
                         <b className="block mb-0.5">The alert is free. The phone call is Caregiver Pro.</b>
