@@ -238,6 +238,59 @@ app.post('/api/lucidity-alert', async (req, res) => {
   res.json({ ok: true, ...state });
 });
 
+// "Send me a test call" — the caregiver checking, on their own terms, that the
+// thing they are relying on actually works. Unlike the help call this one is
+// synchronous: the caregiver is sitting there having pressed a button and
+// wants to know what happened, so they get the answer rather than a log line.
+//
+// It does NOT share the help-button cooldown. That cooldown protects a
+// distressed patient's carer from eleven calls; a caregiver deliberately
+// testing is a different situation, and being unable to test twice would be
+// its own bug. A short window still stops an accidental double-press.
+const lastTestCallAt = new Map<string, number>();
+const TEST_CALL_COOLDOWN_MS = 60_000;
+
+app.post('/api/calls/test', async (req, res) => {
+  const circle = circleOf(req);
+  const toPhone = String(req.body?.toPhone || '').trim();
+  const isPremium = req.body?.isPremium === true;
+
+  if (!toPhone) {
+    return res.status(400).json({ error: 'Save your phone number first, then send yourself a test call.' });
+  }
+  if (!isPremium) {
+    return res.status(402).json({
+      error: 'The help-button call is part of Caregiver Pro. The in-app alert is free and always on.',
+    });
+  }
+  const last = lastTestCallAt.get(circle);
+  if (last !== undefined && Date.now() - last < TEST_CALL_COOLDOWN_MS) {
+    const secs = Math.ceil((TEST_CALL_COOLDOWN_MS - (Date.now() - last)) / 1000);
+    return res.status(429).json({ error: `Just sent one — try again in about ${secs} seconds.` });
+  }
+  lastTestCallAt.set(circle, Date.now());
+
+  try {
+    const result = await placeHelpCall(
+      {
+        toPhone,
+        patientName: String(req.body?.patientName || 'your loved one'),
+        caregiverName: req.body?.caregiverName ? String(req.body.caregiverName) : undefined,
+        at: Date.now(),
+        region: req.body?.region ? String(req.body.region) : undefined,
+      },
+      { test: true }
+    );
+    recordOutcome(circle, 'placed', `Test call — ${result.summary}`);
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    const detail = String(err?.message || err).slice(0, 200);
+    recordOutcome(circle, 'failed', `Test call could not be placed: ${detail}`);
+    console.warn('[Yadira CALL-E] test call failed:', detail);
+    res.status(502).json({ error: detail });
+  }
+});
+
 // What happened to the last help call for this circle — so "it isn't working"
 // becomes a sentence on the caregiver's screen rather than a server log nobody
 // reads. Same resilience rules as the alert routes it sits beside.

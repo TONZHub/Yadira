@@ -435,6 +435,40 @@ function AppContent() {
   // Why the last help call did or did not ring. Every branch is silent to the
   // patient by design; the caregiver is the one person who needs to know.
   const [helpCallStatus, setHelpCallStatus] = useState<{ status: string; detail: string; at: number } | null>(null);
+  const [testingCall, setTestingCall] = useState(false);
+
+  // "Send me a test call" — hearing it once, on your own terms, is the only way
+  // to know it works before the night you need it. It also tells you what the
+  // number looks like on your screen, which is worth more than it sounds: a
+  // real call arrives from an unfamiliar number at an unsociable hour.
+  const sendTestCall = async () => {
+    const phone = (helpCall.escalationPhone || '').trim();
+    if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+      toastError('Check your number', 'Use the full international form, e.g. +15551234567.');
+      return;
+    }
+    setTestingCall(true);
+    try {
+      const res = await fetch('/api/calls/test', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          toPhone: phone,
+          patientName: profile.patientName,
+          caregiverName: profile.caregiverName,
+          region: helpCall.region || undefined,
+          isPremium,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      toastSuccess('Calling you now', 'It usually takes a minute or two to ring. Save the number as a contact when it does.');
+    } catch (err: any) {
+      toastError('Test call not sent', err?.message || 'Please try again.');
+    } finally {
+      setTestingCall(false);
+    }
+  };
   useEffect(() => {
     if (isPatientSession) return;
     let cancelled = false;
@@ -1044,11 +1078,33 @@ function AppContent() {
 
   // Patient tap: raise the alert, then comfort — the companion immediately
   // reassures them that a real person is coming.
+  //
+  // Pressing again is not an error and must never be met with silence. Someone
+  // frightened presses a button repeatedly precisely because they are not sure
+  // it worked, and that is the moment they most need to hear a voice. The
+  // caregiver's phone is not rung again — that is the cooldown, and it is
+  // right — but the person in the room is answered every single time.
+  const repeatComfortRef = useRef(0);
   const handlePatientAlert = () => {
-    if (caregiverAlert.active) return; // already raised
-    sendCaregiverAlert(true);
     const name = caregiverName || 'Your caregiver';
-    const comfort = `${name} has been told, ${patientName || 'dear'}. They will come to you soon. I'm right here with you until then.`;
+    const dear = patientName || 'dear';
+    const alreadyRaised = caregiverAlert.active;
+
+    if (!alreadyRaised) sendCaregiverAlert(true);
+
+    // Said aloud, so it must sound like reassurance rather than a status
+    // update. Nothing here mentions calls, cooldowns, or anything technical —
+    // only that a person knows and is coming.
+    const firstTime = `${name} has been told, ${dear}. They will come to you soon. I'm right here with you until then.`;
+    const againOptions = [
+      `${name} already knows, ${dear}, and they're on their way to you. Let's wait together — I'm right here.`,
+      `I've told ${name}, and they're coming. It won't be long. Stay with me until they get here.`,
+      `${name} is on their way, ${dear}. You did the right thing. I'm not going anywhere.`,
+    ];
+    const comfort = alreadyRaised
+      ? againOptions[repeatComfortRef.current++ % againOptions.length]
+      : firstTime;
+
     appendChatMessage({
       id: `msg-alert-${Date.now()}`,
       role: 'model',
@@ -2583,11 +2639,17 @@ function AppContent() {
 
                   {/* The help button — always visible, full width, one tap
                       reaches a real human. Confirmation state stays until the
-                      caregiver acknowledges from the Hub. */}
+                      caregiver acknowledges from the Hub.
+
+                      Deliberately NOT disabled once raised. Someone frightened
+                      presses again because they are not sure it worked, and a
+                      button that refuses to respond is the cruellest possible
+                      answer to that. It stays pressable, and every press is
+                      met with reassurance — the caregiver's phone is not rung
+                      again, but the person in the room is always answered. */}
                   <button
                     id="btn-alert-caregiver"
                     onClick={handlePatientAlert}
-                    disabled={caregiverAlert.active}
                     className={`w-full mt-1 px-4 py-3.5 rounded-2xl text-base font-extrabold transition-all duration-200 active:scale-[0.98] shadow-xs border-2 flex items-center justify-center gap-2.5 ${
                       caregiverAlert.active
                         ? 'bg-[#F2FAF4] border-[#CEDFCF] text-[#3A5D45]'
@@ -3413,6 +3475,20 @@ function AppContent() {
                         </option>
                       ))}
                     </select>
+                    <button
+                      type="button"
+                      id="btn-test-help-call"
+                      onClick={sendTestCall}
+                      disabled={testingCall}
+                      className="mt-2 w-full flex items-center justify-center gap-2 text-sm font-bold px-3 py-2.5 rounded-xl border-2 border-rose-300 bg-white text-rose-700 disabled:opacity-60 hover:bg-rose-50 transition-colors"
+                    >
+                      {testingCall ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Phone className="w-4 h-4" />}
+                      {testingCall ? 'Calling you…' : 'Send me a test call'}
+                    </button>
+                    <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
+                      Hear it once now, so you know what it sounds like — and so you can save the number as a
+                      contact. The test says plainly that nothing is wrong.
+                    </span>
                     <span className="text-[10px] text-[#7E7D76] leading-tight mt-2 block">
                       The call says only that {profile.patientName || 'they'} asked for you, and when. It never
                       discusses their health, and repeated presses will not ring you over and over. It comes from

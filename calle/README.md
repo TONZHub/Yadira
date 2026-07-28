@@ -54,7 +54,41 @@ local `.env` (already gitignored — never commit it).
 | `CALLE_API_KEY` | Developer API key. Without it the help button still raises the alert; it just cannot ring anyone. |
 | `CALLE_API_BASE_URL` | Override the API host. Point it at the fake server for testing. |
 | `CALLE_WEBHOOK_URL` | Optional. Polling runs regardless — a laptop has no reachable URL. |
-| `HELP_CALL_COOLDOWN_MS` | How long before the same circle can trigger another call. Default 600000. |
+| `HELP_CALL_COOLDOWN_MS` | How long before the same circle can trigger another call. Default 600000. `0` disables it — useful for filming. |
+
+## Checking it works before you need it
+
+Caregiver hub → **Settings** → **Call me when they need me** → **Send me a test
+call**. It rings your own phone and says plainly that nothing is wrong.
+
+Worth doing once at setup, for two reasons that are not obvious: you learn what
+the call sounds like before the night it matters, and you see the number it
+comes from — which is unfamiliar, and worth saving as a contact so a real call
+is not silenced.
+
+The test never claims the patient pressed anything. A caregiver who hears a
+drill worded like the real thing either panics, or learns that these calls are
+sometimes not real — and the second is worse, because this feature cannot
+afford a caregiver who hesitates.
+
+## Recording a demo
+
+The 10-minute cooldown exists so a frightened person pressing the button eleven
+times does not ring their carer eleven times. It also gets in the way of filming,
+where you press the button repeatedly on purpose:
+
+```bash
+HELP_CALL_COOLDOWN_MS=0 npm start
+```
+
+Two other things worth knowing before you record:
+
+- **The call takes a minute or two to come through.** Press the button, then
+  keep filming — or cut. It is not broken.
+- **Pressing again always answers the patient**, even while the cooldown is
+  suppressing further calls. Yadira tells them their caregiver already knows and
+  is on the way. That repeat press is worth filming: it is the moment the design
+  is doing its job on both sides at once.
 
 ## Configuring it as a caregiver
 

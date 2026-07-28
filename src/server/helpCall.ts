@@ -155,7 +155,40 @@ export function cooldownRemaining(circle: string, now = Date.now()): number {
   return Math.max(0, COOLDOWN_MS - (now - last));
 }
 
-export async function placeHelpCall(req: HelpCallRequest): Promise<HelpCallResult> {
+/**
+ * The same call, declared as a test.
+ *
+ * A test call must be unmistakably a test within its first breath. A caregiver
+ * who hears "Eleanor pressed the help button" as a drill will either panic or —
+ * far worse in the long run — learn that these calls are sometimes not real.
+ * The one thing this feature cannot afford is a caregiver who hesitates because
+ * the last one was a test.
+ */
+export function buildTestCallGoal(req: HelpCallRequest): string {
+  const caregiver = req.caregiverName || 'the caregiver';
+  return [
+    `Call ${caregiver} to run a test of their alert system. Nothing is wrong. Say so early and clearly.`,
+    '',
+    'Follow these steps in order:',
+    `1. Open with exactly this: "Hello, this is Yadira. Am I speaking with ${caregiver}?"`,
+    `2. If they say no, or you are not certain it is ${caregiver}: say only "Sorry to have troubled you. Goodbye," and end the call. Say nothing else and name nobody.`,
+    `3. Once they confirm, say immediately: "This is only a test — nothing is wrong, and ${req.patientName} is fine. You asked to hear what a help-button call sounds like."`,
+    '4. Then say: "If they ever press the help button, I will call you like this and tell you they are asking for you."',
+    '5. Tell them this number is worth saving as a contact, so a real call is not silenced as an unknown number.',
+    '6. Thank them and end the call.',
+    '',
+    'Throughout:',
+    'Sound calm and ordinary. This is a reassuring call, not an urgent one — do not use an alarmed tone at any point.',
+    `Never suggest anything is wrong with ${req.patientName}. Never say they pressed anything.`,
+    'If the call reaches voicemail, leave only: "This is Yadira. That was a test of your alert calls, and nothing is wrong."',
+    'Keep the whole call under a minute.',
+  ].join('\n');
+}
+
+export async function placeHelpCall(
+  req: HelpCallRequest,
+  opts: { test?: boolean } = {}
+): Promise<HelpCallResult> {
   if (!isE164(req.toPhone)) {
     throw new Error("The caregiver's phone number must be in E.164 format (e.g. +15551234567).");
   }
@@ -164,15 +197,15 @@ export async function placeHelpCall(req: HelpCallRequest): Promise<HelpCallResul
   }
 
   const result = await placeCallAndWait({
-    task: buildHelpCallGoal(req),
+    task: opts.test ? buildTestCallGoal(req) : buildHelpCallGoal(req),
     phone: req.toPhone,
     region: req.region,
     locale: localeFor(req.region, req.language),
     recipientResultSchema: HELP_RESULT_SCHEMA as unknown as Record<string, any>,
     // One press is one call: a retried request inside the same minute must not
     // ring the caregiver twice.
-    idempotencyKey: `yadira-help-${req.toPhone}-${Math.floor(req.at / 60_000)}`,
-    metadata: { product: 'yadira', workflow: 'help-button' },
+    idempotencyKey: `yadira-${opts.test ? 'test' : 'help'}-${req.toPhone}-${Math.floor(req.at / 60_000)}`,
+    metadata: { product: 'yadira', workflow: opts.test ? 'help-button-test' : 'help-button' },
     // A help call that is still ringing after four minutes has failed at its
     // job; stop waiting and let the caller log it.
     maxWaitMs: 4 * 60_000,
@@ -183,6 +216,20 @@ export async function placeHelpCall(req: HelpCallRequest): Promise<HelpCallResul
   const reachedWho = String(structured.reached || '');
   const reached = reachedWho ? reachedWho === 'caregiver' : result.turns.some((t) => String(t.speaker).includes('user'));
   const acknowledged = String(structured.acknowledged || '') === 'yes';
+
+  if (opts.test) {
+    return {
+      callId: result.callId,
+      reached,
+      acknowledged,
+      phone: maskPhone(req.toPhone),
+      summary: reached
+        ? 'Test call answered — this is how a real one will reach you.'
+        : reachedWho === 'voicemail'
+          ? 'Test call went to voicemail. A real one would too, so keep the app to hand.'
+          : 'Test call was not answered. Worth checking the number, and whether unknown callers are silenced.',
+    };
+  }
 
   const summary = reached
     ? acknowledged

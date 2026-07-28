@@ -184,7 +184,7 @@ npm test                  # 91 tests, node:test
 | `GEMINI_ENTERPRISE_API_KEY` / `GOOGLE_CLOUD_PROJECT` | Route Gemini through the Enterprise Agent Platform instead. |
 | `INWORLD_API_KEY` | Natural voice. Without it, the device voice. |
 | `CALLE_API_KEY` | The help button rings a phone. Without it, the alert still raises. |
-| `HELP_CALL_COOLDOWN_MS` | Gap before the same circle can trigger another call. Default 10 min. |
+| `HELP_CALL_COOLDOWN_MS` | Gap before the same circle can trigger another call. Default 10 min; `0` disables it for demos. |
 | `STRIPE_SECRET_KEY` | Caregiver Pro checkout. See [STRIPE-SETUP.md](STRIPE-SETUP.md). |
 | `RESEND_API_KEY` | Post-signup welcome email. See [EMAIL-SETUP.md](EMAIL-SETUP.md). |
 | `FIREBASE_PROJECT_ID` | Server-side token verification, if not the committed project. |
