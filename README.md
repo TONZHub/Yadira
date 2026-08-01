@@ -116,6 +116,15 @@ The call confirms who answered *before* disclosing anything, says only who asked
 for them and when, and never rings twice for repeated presses. Full design in
 [`calle/`](calle/), which also holds the reusable Agent Skill.
 
+**One setup step decides whether any of it works:** sign in on the patient's
+device with the caregiver's account, *then* tap "I'm a Patient". Patient mode
+inherits the account on the device, and the circle id is that account's uid —
+so a device nobody signed in on lands in a circle of its own, where the alert
+reaches nobody and there is no number to ring. The app now warns before that
+tap, explains the handover in the caregiver's help-call card, and an unlinked
+device never tells the patient that someone has been told and is coming. A
+promise nobody can keep is worse than silence.
+
 ---
 
 ## Architecture
@@ -177,7 +186,7 @@ mode; with no Firebase config it runs entirely on localStorage.
 npm run build             # client + bundled server
 npm start                 # serve on PORT (default 3000)
 npm run lint              # tsc --noEmit
-npm test                  # 91 tests, node:test
+npm test                  # 148 tests, node:test
 ```
 
 ### Configuration

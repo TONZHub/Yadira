@@ -98,6 +98,28 @@ under these rules their cloud sync silently stays off and they run on
 localStorage only. That's the correct trade: paying families are isolated
 and authenticated; the demo still works.
 
+### Setting up the patient's device
+
+This follows directly from "the circle id IS the uid", and it is the one
+step nothing in the app can do on the family's behalf:
+
+> **Sign in on the patient's device with the caregiver's account, then tap
+> "I'm a Patient".** Patient mode inherits whatever account is on the device.
+
+Tapping "I'm a Patient" on a device nobody has signed in on mints a local
+session of its own instead. It looks identical, but it is a different circle:
+the help button raises an alert the caregiver never receives, the escalation
+number saved on the caregiver's device is not there, and the circle is on
+nobody's subscription — so the CALL-E phone call has neither a number to ring
+nor a Pro entitlement to ring it with. This is why the same help button
+"works in Preview Patient View and not on the patient's tablet".
+
+The app now says so in three places rather than leaving it to be discovered:
+the role screen warns before the tap, the caregiver's help-call card spells
+out the handover, and — since a promise nobody can keep is worse than
+silence — an unlinked patient session never tells the patient that someone
+has been told and is coming. See `src/lib/localSession.ts`.
+
 ## Step 7 — Server-side token verification (built)
 
 Firestore rules protect the *database*, but the Express API in `src/server`

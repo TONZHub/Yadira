@@ -35,6 +35,12 @@ export const LoginScreen: React.FC = () => {
     const t = window.setTimeout(finishIntro, INTRO_MS);
     return () => window.clearTimeout(t);
   }, [showIntro]);
+  // Is there an account on this device for patient mode to inherit? If not,
+  // "I'm a Patient" starts a session in a circle of its own — fine for a look
+  // around, wrong for the patient's real tablet, where it would leave the help
+  // button raising alerts nobody receives. Said plainly below rather than left
+  // to be discovered on the night it matters.
+  const deviceHasAccount = typeof window !== 'undefined' && !!localStorage.getItem('yadira_token');
   const [screen, setScreen] = useState<'role' | 'caregiver'>('role');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -196,10 +202,31 @@ export const LoginScreen: React.FC = () => {
                 <UserRound className="w-6 h-6 text-[#5C8D71]" />
                 <div>
                   <p className="font-bold">I'm a Patient</p>
-                  <p className="text-xs text-[#7E7D76]">Start with one tap, no password</p>
+                  <p className="text-xs text-[#7E7D76]">
+                    {deviceHasAccount
+                      ? 'Connected to your care circle — one tap, no password'
+                      : 'Start with one tap, no password'}
+                  </p>
                 </div>
               </div>
             </button>
+            {!deviceHasAccount && (
+              <div className="rounded-xl border border-[#E3DFC2] bg-[#FCFAF5] p-3.5 text-left">
+                <p className="text-xs text-[#5A594F] leading-relaxed">
+                  <span className="font-bold text-[#2C2C2A]">Setting up the patient's own device?</span>{' '}
+                  Sign in with the caregiver's account first, then hand it over. That is what
+                  connects the help button to you — without it this device runs on its own, and
+                  nothing it raises reaches your phone.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setScreen('caregiver')}
+                  className="mt-2 text-xs font-bold text-[#3A5D45] underline"
+                >
+                  Sign in to connect this device
+                </button>
+              </div>
+            )}
             {/* The patient path stays frictionless — the caregiver is the
                 account holder who formally consents at signup. */}
             <p className="text-center text-[11px] text-[#8A8981] pt-1">
