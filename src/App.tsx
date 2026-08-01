@@ -146,8 +146,14 @@ const DEFAULT_ROUTINE: RoutineItem[] = [
 ];
 
 function AppContent() {
-  const { user, sessionRole, logout } = useAuth();
+  const { user, sessionRole, isUnlinkedPatient, logout } = useAuth();
   const isPatientSession = sessionRole === 'patient';
+  // A patient session that never joined a care circle sits in one of its own:
+  // the caregiver never receives what it raises, it holds no escalation
+  // number, and it is on nobody's subscription. Nothing here can fix that —
+  // only signing the device in can — but the app must stop promising help is
+  // coming when it demonstrably is not. See src/lib/localSession.ts.
+  const helpReachesCaregiver = !isUnlinkedPatient;
   const { error: toastError, success: toastSuccess } = useToast();
   const [demoSeeded, setDemoSeeded] = useState(false);
 
@@ -1095,12 +1101,27 @@ function AppContent() {
     // Said aloud, so it must sound like reassurance rather than a status
     // update. Nothing here mentions calls, cooldowns, or anything technical —
     // only that a person knows and is coming.
-    const firstTime = `${name} has been told, ${dear}. They will come to you soon. I'm right here with you until then.`;
-    const againOptions = [
-      `${name} already knows, ${dear}, and they're on their way to you. Let's wait together — I'm right here.`,
-      `I've told ${name}, and they're coming. It won't be long. Stay with me until they get here.`,
-      `${name} is on their way, ${dear}. You did the right thing. I'm not going anywhere.`,
-    ];
+    //
+    // On an unlinked device there is nobody at the other end, so none of these
+    // lines may claim there is. Telling a person with dementia that someone
+    // has been told and is coming, when no message left the tablet, is exactly
+    // the disorientation this app exists to prevent — and they would sit and
+    // wait on it. The unlinked lines give the one thing that is still true:
+    // presence.
+    const firstTime = helpReachesCaregiver
+      ? `${name} has been told, ${dear}. They will come to you soon. I'm right here with you until then.`
+      : `I'm right here with you, ${dear}. You're not on your own — I'm staying right here.`;
+    const againOptions = helpReachesCaregiver
+      ? [
+          `${name} already knows, ${dear}, and they're on their way to you. Let's wait together — I'm right here.`,
+          `I've told ${name}, and they're coming. It won't be long. Stay with me until they get here.`,
+          `${name} is on their way, ${dear}. You did the right thing. I'm not going anywhere.`,
+        ]
+      : [
+          `I'm still here, ${dear}. Let's stay together a while.`,
+          `You're not on your own. I'm right beside you, ${dear}.`,
+          `I'm here, ${dear}, and I'm not going anywhere. Take your time.`,
+        ];
     const comfort = alreadyRaised
       ? againOptions[repeatComfortRef.current++ % againOptions.length]
       : firstTime;
@@ -2659,7 +2680,9 @@ function AppContent() {
                     {caregiverAlert.active ? (
                       <>
                         <Check className="w-5 h-5" />
-                        {caregiverName || 'Your caregiver'} has been told — they're coming
+                        {helpReachesCaregiver
+                          ? `${caregiverName || 'Your caregiver'} has been told — they're coming`
+                          : "I'm right here with you"}
                       </>
                     ) : (
                       <>
@@ -3495,6 +3518,18 @@ function AppContent() {
                       an unfamiliar number — worth saving as a contact once you have seen it, so it is not
                       silenced at four in the morning.
                     </span>
+                    {/* The one setup step nothing else can do for them. A test
+                        call proves this number rings; it proves nothing about
+                        the tablet in the other room, which reaches you only if
+                        it is signed in to this same account. */}
+                    <div className="mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border border-[#E3DFC2] bg-[#FCFAF5] text-[#5E5D57]">
+                      <b className="block mb-0.5">
+                        {profile.patientName || 'Their'} device has to be signed in to this account.
+                      </b>
+                      Open Yadira on their tablet, sign in as <i>you</i>, then tap <b>I'm a Patient</b> and
+                      hand it over. Tapping <b>I'm a Patient</b> on a device nobody has signed in on starts a
+                      demo instead — it looks identical, and the help button on it will never reach you.
+                    </div>
                     {helpCallStatus && (
                       <div
                         className={`mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border ${

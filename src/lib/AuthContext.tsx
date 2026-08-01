@@ -1,11 +1,15 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, getAdditionalUserInfo, Auth } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from './firebase';
+import { isUnlinkedPatientCircle, localUid, UNLINKED_PATIENT_EMAIL } from './localSession';
 
 interface AuthContextType {
   user: { uid: string; email: string | null } | null;
   token: string | null;
   sessionRole: 'caregiver' | 'patient';
+  /** True when this is a patient session that never joined a care circle, so
+      nothing it raises leaves the device — no banner, no phone call. */
+  isUnlinkedPatient: boolean;
   loading: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
@@ -54,7 +58,7 @@ function startLocalSession(
   setToken: React.Dispatch<React.SetStateAction<string | null>>,
   setError: React.Dispatch<React.SetStateAction<string | null>>
 ) {
-  const uid = `local-${email.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'user'}`;
+  const uid = localUid(email, localStorage.getItem('yadira_user_id'));
   const localToken = createLocalDemoToken(uid, email);
   setUser({ uid, email });
   setToken(localToken);
@@ -283,6 +287,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // sessions stopped auto-restoring on fresh visits, `user` is null on the
     // login screen even when a valid token sits in localStorage — previously
     // this function skipped setUser in that case and the tap did nothing.
+    //
+    // Note the two outcomes, because they are not the same product. With a
+    // token present the device keeps the caregiver's uid, so it is INSIDE the
+    // family's circle: the help button reaches them and their phone rings.
+    // Without one it starts a local session in a circle of its own, which is
+    // a demo — nothing it raises leaves the device. `isUnlinkedPatient` is
+    // how the rest of the app tells which of the two it is standing in.
     const existingToken = localStorage.getItem('yadira_token');
     const payload = existingToken ? parseJwtPayload(existingToken) : null;
     const uid = payload?.uid || payload?.user_id || payload?.sub;
@@ -291,7 +302,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(existingToken);
       setError(null);
     } else {
-      startLocalSession('patient@yadira.local', setUser, setToken, setError);
+      startLocalSession(UNLINKED_PATIENT_EMAIL, setUser, setToken, setError);
     }
     sessionStorage.setItem('yadira_session_role', 'patient');
     setSessionRole('patient');
@@ -318,7 +329,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, sessionRole, loading, error, login, signup, loginWithGoogle, enterPatientMode, logout }}>
+    <AuthContext.Provider value={{ user, token, sessionRole, isUnlinkedPatient: isUnlinkedPatientCircle(user?.uid), loading, error, login, signup, loginWithGoogle, enterPatientMode, logout }}>
       {children}
     </AuthContext.Provider>
   );
