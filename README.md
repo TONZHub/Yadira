@@ -66,6 +66,11 @@ is a different act.
 - **Photo album & memories** — real family photos with AI-written captions the
   caregiver can edit.
 - **Help button** — one tap that reaches a real human. See below.
+- **Dictation that stays silent when they did** — Whisper-family models invent
+  fluent text over silence rather than returning nothing, so a fumbled tap
+  became words the patient never said. Recordings are checked for duration and
+  microphone level before being sent, and known artifacts are dropped on the way
+  back. See `src/server/transcription.ts`.
 - **Accessibility throughout** — large-text mode applied before first paint,
   colour themes, dark mode, reduced-motion support, and a lockable full-screen
   patient view.
