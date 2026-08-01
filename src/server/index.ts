@@ -73,12 +73,44 @@ const useEnterprisePlatform = !!gcpProject || !!enterpriseApiKey;
 // carries credits. Overridable via OPENROUTER_MODEL so trying e.g.
 // poolside/laguna-m.1 (the flagship) is a Render env change, not a deploy.
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'poolside/laguna-xs-2.1';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || (useEnterprisePlatform ? 'gemini-2.5-flash' : 'gemini-3.5-flash');
+// One default for both routes. The Enterprise path used to pin gemini-2.5-flash
+// while AI Studio was already on 3.5 — a split that quietly meant two families
+// of behaviour depending on which key was set, and 2.5 is being retired. If an
+// Enterprise project does not have 3.5 enabled, set GEMINI_MODEL rather than
+// reintroducing the fork.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+
 // Media analysis reads family photos — faces, eras, places — where flash-class
 // models miss the details that make reminiscence land. Default to the pro
 // sibling of whatever family GEMINI_MODEL is on; override with
 // GEMINI_VISION_MODEL if the derived name doesn't exist for your account.
 const GEMINI_VISION_MODEL = process.env.GEMINI_VISION_MODEL || GEMINI_MODEL.replace('flash', 'pro');
+
+// Resolved model names, logged once at boot.
+//
+// These are strings sent to a provider, so a retired or misspelled name fails
+// at the moment somebody uses the feature — a caregiver waiting on an insight
+// report — rather than at deploy. Printing them makes a bad name obvious while
+// somebody is still watching the logs.
+//
+// The vision derivation is a plain string swap: if GEMINI_MODEL contains no
+// "flash", vision silently runs on the SAME model as everything else, which is
+// the whole reason for the pro sibling. Say so rather than letting it pass.
+console.info(
+  `[Yadira] Models — chat: ${OPENROUTER_MODEL} · gemini: ${GEMINI_MODEL} · vision: ${GEMINI_VISION_MODEL}`
+);
+if (GEMINI_VISION_MODEL === GEMINI_MODEL) {
+  console.warn(
+    `[Yadira] Vision is using the same model as everything else (${GEMINI_MODEL}). ` +
+      'Photo analysis wants a pro-class model — set GEMINI_VISION_MODEL explicitly.'
+  );
+}
+if (/gemini-(1\.5|2\.0|2\.5)/.test(`${GEMINI_MODEL} ${GEMINI_VISION_MODEL}`)) {
+  console.warn(
+    '[Yadira] A configured Gemini model is from a retired family. ' +
+      'Update GEMINI_MODEL / GEMINI_VISION_MODEL before it stops answering.'
+  );
+}
 // Cross-device sync state, keyed by care circle. One family toggling Vivid
 // or Aurora must never flip the screens of another paying customer — the
 // old module-level booleans were shared across every visitor to the server.

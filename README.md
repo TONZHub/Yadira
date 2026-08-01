@@ -147,7 +147,8 @@ before taking real customers.
 | Job | Provider |
 | --- | --- |
 | Companion conversation, drift, redirection | OpenRouter (`poolside/laguna-xs-2.1` by default) |
-| Routines, clinical insights, media analysis | Gemini |
+| Routines, clinical insights, transcription | Gemini (`gemini-3.5-flash`) |
+| Family-photo analysis | Gemini pro-class (`gemini-3.5-pro`) — flash misses the detail that unlocks a memory |
 | Natural voice | Inworld TTS |
 | Phone calls | CALL-E |
 
@@ -181,6 +182,8 @@ npm test                  # 91 tests, node:test
 | `OPENROUTER_API_KEY` | The companion's conversation. Without it, simulation mode. |
 | `OPENROUTER_MODEL` | Override the chat model. |
 | `GEMINI_API_KEY` | Routines, insights, media analysis, transcription fallback. |
+| `GEMINI_MODEL` | Override the Gemini model. Defaults to `gemini-3.5-flash` on both routes. |
+| `GEMINI_VISION_MODEL` | Photo analysis. Defaults to the pro sibling of `GEMINI_MODEL`. |
 | `GEMINI_ENTERPRISE_API_KEY` / `GOOGLE_CLOUD_PROJECT` | Route Gemini through the Enterprise Agent Platform instead. |
 | `INWORLD_API_KEY` | Natural voice. Without it, the device voice. |
 | `CALLE_API_KEY` | The help button rings a phone. Without it, the alert still raises. |
