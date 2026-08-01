@@ -15,6 +15,7 @@ import {
   escapeRegExp,
 } from './textSafety';
 import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity';
+import { looksLikeSilence, cleanTranscript } from './transcription';
 import {
   placeHelpCall,
   withinCooldown,
@@ -1037,12 +1038,22 @@ ${COMPANION_GUARDRAILS}`;
 //   4. none            → 501; the client falls back to the browser's own
 //      Web Speech recognition, so dictation never goes dark.
 app.post('/api/transcribe', async (req, res) => {
-  const { audio, mimeType } = req.body || {};
+  const { audio, mimeType, durationMs, peakLevel } = req.body || {};
   if (!audio || typeof audio !== 'string') {
     return res.status(400).json({ error: 'audio (base64) is required' });
   }
   const b64 = audio.split(',').pop() as string;
   const type = (typeof mimeType === 'string' && mimeType) || 'audio/webm';
+
+  // Never hand silence to a transcription model. They do not answer "nothing" —
+  // they invent fluent text from training data, and that text then becomes what
+  // the patient said. Reported from a live session: "double o seven" and
+  // "The system is down".
+  const bytes = Math.floor((b64.length * 3) / 4);
+  if (looksLikeSilence({ bytes, durationMs, peakLevel })) {
+    console.info('[Yadira] Transcription skipped — the recording was silence.');
+    return res.json({ text: '', provider: 'skipped-silence' });
+  }
 
   try {
     const openaiKey = process.env.OPENAI_API_KEY;
@@ -1063,7 +1074,11 @@ app.post('/api/transcribe', async (req, res) => {
       });
       if (!r.ok) throw new Error(`Whisper HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
       const data: any = await r.json();
-      return res.json({ text: (data.text || '').trim(), provider: openaiKey ? 'openai-whisper' : 'groq-whisper' });
+      const text = cleanTranscript(data.text || '');
+      if (!text && (data.text || '').trim()) {
+        console.info(`[Yadira] Dropped a transcription artifact: ${JSON.stringify(String(data.text).slice(0, 60))}`);
+      }
+      return res.json({ text, provider: openaiKey ? 'openai-whisper' : 'groq-whisper' });
     }
 
     if (genAI) {
@@ -1079,7 +1094,11 @@ app.post('/api/transcribe', async (req, res) => {
           },
         ],
       });
-      return res.json({ text: (response.text || '').trim(), provider: 'gemini' });
+      const text = cleanTranscript(response.text || '');
+      if (!text && (response.text || '').trim()) {
+        console.info(`[Yadira] Dropped a transcription artifact: ${JSON.stringify(String(response.text).slice(0, 60))}`);
+      }
+      return res.json({ text, provider: 'gemini' });
     }
 
     return res.status(501).json({ error: 'no_transcription_provider' });

@@ -32,6 +32,8 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
   const dataArrayRef = useRef<Uint8Array | null>(null);
   const [waveformLevel, setWaveformLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordStartedAtRef = useRef(0);
+  const peakLevelRef = useRef(0);
   const audioChunksRef = useRef<Blob[]>([]);
   const recorderMimeRef = useRef('audio/webm');
   // Live-caption text mirrored in a ref so the async stop handler always
@@ -103,6 +105,8 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
       audioChunksRef.current = [];
       recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       recorder.start();
+      recordStartedAtRef.current = Date.now();
+      peakLevelRef.current = 0;
       mediaRecorderRef.current = recorder;
     } catch {
       mediaRecorderRef.current = null; // captions-only mode
@@ -121,7 +125,12 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
         if (analyzerRef.current && dataArrayRef.current && mediaStreamRef.current) {
           analyzerRef.current.getByteFrequencyData(dataArrayRef.current);
           const average = dataArrayRef.current.reduce((a, b) => a + b) / dataArrayRef.current.length;
-          setWaveformLevel(average / 255);
+          const level = average / 255;
+          // The waveform already measures this; remembering the peak is what
+          // tells us afterwards whether anybody actually spoke. Silence sent to
+          // a transcription model comes back as confident invented text.
+          if (level > peakLevelRef.current) peakLevelRef.current = level;
+          setWaveformLevel(level);
           requestAnimationFrame(updateWaveform);
         }
       };
@@ -161,12 +170,19 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
     let finalText = liveTranscriptRef.current.trim();
     try {
       // Whisper-grade pass — server picks the best configured provider.
-      if (recorded && recorded.size > 200) {
+      //
+      // The old floor here was 200 bytes, which a container header clears on
+      // its own: a fumbled tap sent silence to the model and got invented words
+      // back. Duration and peak level are sent too, so the server can refuse on
+      // evidence rather than on file size alone.
+      const durationMs = recordStartedAtRef.current ? Date.now() - recordStartedAtRef.current : undefined;
+      const peakLevel = peakLevelRef.current;
+      if (recorded && recorded.size > 1200) {
         const audio = await blobToBase64(recorded);
         const r = await fetch('/api/transcribe', {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ audio, mimeType: recorderMimeRef.current }),
+          body: JSON.stringify({ audio, mimeType: recorderMimeRef.current, durationMs, peakLevel }),
         });
         if (r.ok) {
           const data = await r.json();
