@@ -430,11 +430,58 @@ const SettingsTab: React.FC<SettingsTabProps> = (props) => {
               <span className="text-xs font-extrabold uppercase tracking-wider text-[#2C2C2A] flex items-center gap-1.5">
                 <Sparkles className="w-3.5 h-3.5 text-indigo-500" /> Caregiver Pro
               </span>
-              <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
-                {isPremium
-                  ? `Active — the help button rings your phone, plus unlimited AI care reports (routines & clinical insights) for this caregiver. The companion itself is free for your family, always.`
-                  : `The companion is free for your family — ${representedPersona || 'the loved one'}'s natural voice, Call Mode, Session Memory, calming rooms, and photos, always. Caregiver Pro (${PRICE_BOTH}) makes the help button ring your phone as well as the screen, and adds unlimited AI care reports; free includes one routine + one insights report each week. Run a care facility? Email partnerships@yadira.chat about a per-unit partnership.`}
-              </span>
+              {isPremium ? (
+                <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
+                  Active — the help button rings your phone, plus unlimited AI care reports
+                  (routines &amp; clinical insights) for this caregiver. The companion itself is
+                  free for your family, always.
+                </span>
+              ) : (
+                <>
+                  {/* The price used to sit on its own next to a generous free
+                      tier, which framed Pro as the thing you pay for to stop
+                      being limited. It is not — it is the caregiver's half of
+                      the product, and a companion that only talks to the
+                      patient cannot do any of it. Naming those three things
+                      beside the number is the whole argument. */}
+                  <span className="text-[10px] text-[#5E5D57] leading-tight mt-1 block font-semibold">
+                    A companion keeps them company. Pro keeps you in the loop.
+                  </span>
+                  <ul className="mt-1.5 space-y-1">
+                    {[
+                      [
+                        'The call, not just the banner',
+                        `When ${profile.patientName || 'they'} press the help button it rings your actual phone — at four in the morning, from another state, with your screen face-down.`,
+                      ],
+                      [
+                        'Reports from real days',
+                        'Routines and clinical insights written from what was actually logged that week — the thing you bring to the neurologist.',
+                      ],
+                      [
+                        'Unlimited Ask Yadira',
+                        'Ask about their week, their moods, their sleep, as often as you need. Free includes five messages and one report a week.',
+                      ],
+                    ].map(([title, body]) => (
+                      <li key={title} className="flex gap-1.5 text-[10px] leading-snug text-[#7E7D76]">
+                        <span className="text-[#5C8D71] font-bold shrink-0">·</span>
+                        <span>
+                          <b className="text-[#2C2C2A]">{title}</b> — {body}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <span className="text-[10px] text-[#7E7D76] leading-tight mt-1.5 block">
+                    Everything {representedPersona || 'your loved one'} touches stays free forever —
+                    their natural voice, Call Mode, Session Memory, the calming rooms, the photos.
+                    Pro ({PRICE_BOTH}) is the caregiver&rsquo;s side, and it runs on the tablet you
+                    already own. Run a care facility?{' '}
+                    <a href="mailto:partnerships@yadira.chat" className="underline">
+                      partnerships@yadira.chat
+                    </a>
+                    .
+                  </span>
+                </>
+              )}
             </div>
             <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${isPremium ? 'bg-[#3A5D45] text-white' : 'bg-[#EAE8DD] text-[#7E7D76]'}`}>
               {isPremium ? 'Pro' : 'Free'}

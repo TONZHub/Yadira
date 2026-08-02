@@ -530,6 +530,25 @@ async function openRouterChat(
   }
 
   const data = await response.json();
+
+  // What this exchange actually cost, in tokens.
+  //
+  // A stress test put a family at $6.10/week and there was no way to see
+  // where it went. The system prompt is ~364 tokens, so it is not the prompt;
+  // the suspect is `maxTokens` — 1500 of output budget for a reply trimmed to
+  // four sentences, spent by a reasoning model on private deliberation that
+  // bills at output rates and is then thrown away. `reasoning_tokens` is the
+  // number that settles it, and it costs nothing to print.
+  const usage = data.usage;
+  if (usage) {
+    const reasoned = usage.completion_tokens_details?.reasoning_tokens;
+    console.info(
+      `[Yadira cost] prompt=${usage.prompt_tokens} completion=${usage.completion_tokens}` +
+        (reasoned != null ? ` (reasoning=${reasoned})` : '') +
+        ` total=${usage.total_tokens}`
+    );
+  }
+
   const content = data.choices?.[0]?.message?.content;
   const cleaned = cleanModelOutput(content || '');
 
@@ -561,6 +580,15 @@ async function openRouterChat(
 // Reply hygiene (cleanModelOutput, breaksCharacter, trimToSentences) and the
 // terminal-lucidity tripwire live in their own modules so they can be tested
 // directly — see textSafety.test.ts and lucidity.test.ts.
+
+// How much conversation is resent with every message.
+//
+// Was 12. Every turn is re-uploaded on every exchange, on top of the memories,
+// the gallery captions and the persona file, and the companion's continuity
+// does not actually come from here — Session Memory carries what matters
+// across a visit. Eight keeps the thread of the current exchange without
+// paying for the whole visit each time someone speaks.
+const HISTORY_TURNS = Number(process.env.CHAT_HISTORY_TURNS) || 8;
 
 // Empathic System Instruction for Yadira
 // Distilled dementia-care practice woven into the companion's behavior:
@@ -1077,7 +1105,7 @@ ${COMPANION_GUARDRAILS}`;
     const openRouterMessages: { role: 'user' | 'assistant'; content: string }[] = [];
 
     if (history && Array.isArray(history)) {
-      for (const chatTurn of history.slice(-12)) {
+      for (const chatTurn of history.slice(-HISTORY_TURNS)) {
         const role = chatTurn.role === 'user' ? 'user' : 'assistant';
         // Skip leading assistant turns — must start with user
         if (openRouterMessages.length === 0 && role === 'assistant') continue;
