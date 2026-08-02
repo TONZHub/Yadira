@@ -93,7 +93,30 @@ function isFirebaseAuthConfigError(err: any): boolean {
 function activeSessionRole(): 'caregiver' | 'patient' | null {
   if (typeof window === 'undefined') return null;
   const role = sessionStorage.getItem('yadira_session_role');
-  return role === 'patient' || role === 'caregiver' ? role : null;
+  if (role === 'patient' || role === 'caregiver') return role;
+
+  // ...with one exception: a device under Care Lock.
+  //
+  // The rule above exists so a shared or public browser never auto-resumes
+  // somebody's session. A care-locked tablet is the exact opposite situation
+  // — it is a dedicated patient device, deliberately pinned to the companion
+  // by a caregiver who then handed it over. When it restarts overnight, the
+  // rule as written puts a login screen in front of a person with dementia
+  // and asks them to pick a role. They cannot be asked for a password, and
+  // they should not have to be: the account is still on the device, which is
+  // the only thing that was ever in question.
+  //
+  // Resuming as 'caregiver' restores exactly the pre-restart state — Care
+  // Lock pins the view to the companion and hides every caregiver control, so
+  // the role underneath is the one it already had.
+  try {
+    if (localStorage.getItem('yadira_care_lock') === '1' && localStorage.getItem('yadira_token')) {
+      sessionStorage.setItem('yadira_session_role', 'caregiver');
+      return 'caregiver';
+    }
+  } catch { /* storage blocked — fall through to the login screen */ }
+
+  return null;
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
