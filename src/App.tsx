@@ -1113,6 +1113,7 @@ function AppContent() {
             // Server vs. the circle's durable copy — newest wins. A server that
             // has just restarted answers {active:false, at:0}, which must not
             // be allowed to silence an alert Firestore still knows about.
+            if (typeof data?.canGetThere === 'string') setCanGetThere(data.canGetThere);
             const fromServer = { active: data.active as boolean, at: (data.at as number) || 0 };
             const stored = helpAlertDocRef.current;
             const winner = stored.at > fromServer.at ? stored : fromServer;
@@ -1179,6 +1180,13 @@ function AppContent() {
   // it worked, and that is the moment they most need to hear a voice. The
   // caregiver's phone is not rung again — that is the cooldown, and it is
   // right — but the person in the room is answered every single time.
+  // What the caregiver said on the phone when asked whether they can get
+  // there. 'no' is the one that changes what the companion may say: promising
+  // that someone is on their way, after that someone has said they cannot
+  // come, is the same false reassurance as an unlinked device — and this one
+  // is worse, because it is contradicted by a person who actually answered.
+  const [canGetThere, setCanGetThere] = useState<'yes' | 'no' | 'unknown'>('unknown');
+
   const repeatComfortRef = useRef(0);
   const handlePatientAlert = () => {
     const name = caregiverName || 'Your caregiver';
@@ -1200,7 +1208,21 @@ function AppContent() {
     const firstTime = helpReachesCaregiver
       ? `${name} has been told, ${dear}. They will come to you soon. I'm right here with you until then.`
       : `I'm right here with you, ${dear}. You're not on your own — I'm staying right here.`;
-    const againOptions = helpReachesCaregiver
+    // When the caregiver has answered the phone and said they cannot get
+    // there, "they're on their way" becomes a lie told to someone who will sit
+    // and wait on it. These lines drop the arrival and keep everything that is
+    // still true: they were told, it was the right thing to do, and the
+    // companion is not going anywhere. Nothing here says nobody is coming —
+    // that is the caregiver's news to give, not a sentence to leave with
+    // someone alone in a room.
+    const nobodyComing = helpReachesCaregiver && canGetThere === 'no';
+    const againOptions = nobodyComing
+      ? [
+          `${name} knows, ${dear}. I'm staying right here with you in the meantime.`,
+          `You did the right thing telling them. Let's keep each other company a while.`,
+          `I'm not going anywhere, ${dear}. We'll sit together for a bit.`,
+        ]
+      : helpReachesCaregiver
       ? [
           `${name} already knows, ${dear}, and they're on their way to you. Let's wait together — I'm right here.`,
           `I've told ${name}, and they're coming. It won't be long. Stay with me until they get here.`,

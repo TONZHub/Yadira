@@ -37,6 +37,16 @@ export interface HelpCallResult {
   callId: string;
   reached: boolean;
   acknowledged: boolean;
+  /**
+   * Whether they said they can get there — kept as three states, not two.
+   *
+   * "No" and "didn't say" used to collapse into the same sentence, and they
+   * are not the same situation at all: one means nobody is coming, the other
+   * means we do not know. The patient's own device reads this, so flattening
+   * it is how Yadira ends up telling someone their son is on his way after
+   * he has said he cannot come.
+   */
+  canGetThere: 'yes' | 'no' | 'unknown';
   phone: string;
   summary: string;
 }
@@ -64,14 +74,20 @@ export function buildHelpCallGoal(req: HelpCallRequest): string {
     `2. If they say no, or they are evasive, or you are not certain it is ${caregiver}: say only "Sorry to have troubled you. Goodbye," and end the call. Do NOT say why you are calling. Do NOT name anyone. Do NOT ask them to pass on a message. A wrong number learns only that somebody called.`,
     `3. Once they confirm they are ${caregiver}, say: "${req.patientName} has pressed the help button and is asking for you. Please go to them when you can."`,
     `4. Then ask, gently and once: "Are you able to get to them?" Ask it as a question, not an instruction. Do not press for a commitment, do not repeat it, and do not tell them what to do — they may have been asleep, and they know their own situation better than you do.`,
-    '5. Thank them warmly and end the call.',
+    '5. If they say yes: thank them warmly and end the call.',
+    `6. If they say NO, or they are unsure, this is the moment that matters most — do not simply thank them and hang up. They may be at work, driving, or three hours away, and "no" is an answer, not a failure. Do not sound disappointed and do not ask again. Instead, in this order and briefly:`,
+    `   a. Accept it plainly: "That's alright."`,
+    `   b. Ask one question, once: "Is there anyone else nearby who could look in on them?" If they name someone, thank them and move on — do not ask for a number and do not offer to call that person, because you cannot.`,
+    `   c. Then tell them the one thing that is actually true and worth hearing: "I'll stay with ${req.patientName} and keep them company until someone can get there." Say it as a fact, because it is one — the companion is on their device and will keep talking with them.`,
+    `   d. Last, once, without pressing: "If you're worried about their safety, please call emergency services." State it and stop. Whether to call is their judgement, not yours — you do not know what is happening in that room and you must not decide for them.`,
+    '7. Thank them warmly and end the call.',
     '',
     'Throughout:',
     'Sound like a person passing on a message, not a system issuing an order. Warm, unhurried, ordinary.',
     'Speak clearly and calmly. Do not sound alarmed — panic does not help anyone get there faster.',
     'Say nothing about their health, their condition, or anything they said. You do not know why they pressed it, and you must not speculate.',
     `If the call reaches voicemail, do not name ${req.patientName} and do not say why you are calling — a voicemail can be played aloud to a room. Leave only: "This is Yadira calling for ${caregiver}. There is an alert waiting in your Yadira app. Please check it now."`,
-    'Keep the whole call under a minute.',
+    'Keep the whole call under a minute — under ninety seconds if they said they cannot get there, since that branch has more to say.',
   ].join('\n');
 }
 
@@ -151,12 +167,19 @@ export interface HelpCallOutcome {
   /** One sentence a caregiver can act on. Never contains a full number. */
   detail: string;
   at: number;
+  /** Read by the PATIENT's device, so it never promises help that is not coming. */
+  canGetThere?: 'yes' | 'no' | 'unknown';
 }
 
 const lastOutcome = new Map<string, HelpCallOutcome>();
 
-export function recordOutcome(circle: string, status: HelpCallStatus, detail: string): void {
-  lastOutcome.set(circle, { status, detail, at: Date.now() });
+export function recordOutcome(
+  circle: string,
+  status: HelpCallStatus,
+  detail: string,
+  canGetThere?: 'yes' | 'no' | 'unknown'
+): void {
+  lastOutcome.set(circle, { status, detail, at: Date.now(), canGetThere });
 }
 
 export function getOutcome(circle: string): HelpCallOutcome | null {
@@ -230,7 +253,10 @@ export async function placeHelpCall(
   const structured = result.recipientResult || {};
   const reachedWho = String(structured.reached || '');
   const reached = reachedWho ? reachedWho === 'caregiver' : result.turns.some((t) => String(t.speaker).includes('user'));
-  const acknowledged = String(structured.acknowledged || '') === 'yes';
+  const rawAck = String(structured.acknowledged || '').toLowerCase();
+  const canGetThere: 'yes' | 'no' | 'unknown' =
+    rawAck === 'yes' ? 'yes' : rawAck === 'no' ? 'no' : 'unknown';
+  const acknowledged = canGetThere === 'yes';
 
   if (opts.test) {
     return {
@@ -238,6 +264,7 @@ export async function placeHelpCall(
       reached,
       acknowledged,
       phone: maskPhone(req.toPhone),
+      canGetThere,
       summary: reached
         ? 'Test call answered — this is how a real one will reach you.'
         : reachedWho === 'voicemail'
@@ -246,15 +273,27 @@ export async function placeHelpCall(
     };
   }
 
+  const who = req.caregiverName || 'The caregiver';
   const summary = reached
-    ? acknowledged
-      ? `${req.caregiverName || 'The caregiver'} was reached and is going to ${req.patientName}.`
-      : `${req.caregiverName || 'The caregiver'} was reached but did not confirm.`
+    ? canGetThere === 'yes'
+      ? `${who} was reached and is going to ${req.patientName}.`
+      : canGetThere === 'no'
+        // The one outcome that needs the caregiver to do something else. Said
+        // plainly rather than softened into "did not confirm".
+        ? `${who} was reached but said they cannot get to ${req.patientName} right now.`
+        : `${who} was reached but did not say whether they can get there.`
     : reachedWho === 'voicemail'
       ? 'The call reached voicemail; a message was left.'
       : reachedWho === 'someone_else'
         ? 'Someone else answered the phone.'
         : 'The caregiver could not be reached by phone.';
 
-  return { callId: result.callId, reached, acknowledged, phone: maskPhone(req.toPhone), summary };
+  return {
+    callId: result.callId,
+    reached,
+    acknowledged,
+    canGetThere,
+    phone: maskPhone(req.toPhone),
+    summary,
+  };
 }

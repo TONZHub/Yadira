@@ -123,7 +123,13 @@ patient presses help
 ```
 
 The call confirms who answered *before* disclosing anything, says only who asked
-for them and when, and never rings twice for repeated presses. Full design in
+for them and when, and never rings twice for repeated presses. When the
+caregiver says they *cannot* get there — the moment the patient is least likely
+to get help, and the one the call used to answer with "thank you, goodbye" — it
+accepts that without pressing, asks once whether anyone else is nearby, says the
+one thing that is actually true (the companion stays with them), and leaves the
+decision to call emergency services where it belongs. That answer also travels
+back: the companion stops telling the patient someone is on their way. Full design in
 [`calle/`](calle/), which also holds the reusable Agent Skill.
 
 **One setup step decides whether any of it works.** On the patient's device,
@@ -205,7 +211,7 @@ mode; with no Firebase config it runs entirely on localStorage.
 npm run build             # client + bundled server
 npm start                 # serve on PORT (default 3000)
 npm run lint              # tsc --noEmit
-npm test                  # 224 tests, node:test
+npm test                  # 233 tests, node:test
 ```
 
 ### Configuration
