@@ -10,6 +10,14 @@ export interface Message {
     emotion: string;
     confidence: number;
     tone: string;
+    /** How it was known. 'voice' was heard in the audio itself — pace,
+        tremor, breath, crying — and can contradict the words. 'text' was
+        inferred from the wording, which reads a flat "I'm fine" and a bright
+        one identically. Stored per message so a caregiver reading back
+        through a day can tell which of the two they are looking at, and so
+        the older messages recorded before this existed stay honest by
+        simply having no source at all. */
+    source?: 'voice' | 'text';
   };
   mediaInsight?: {
     description: string;

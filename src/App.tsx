@@ -1714,7 +1714,7 @@ function AppContent() {
   }, [voiceEnabled, activeTab]);
 
   // Handle Patient message submission
-  const handleSendMessage = async (textToSend: string, emotion?: { emotion: string; confidence: number; tone: string }, mediaInsight?: { description: string; emotion: string; suggestions: string[] }) => {
+  const handleSendMessage = async (textToSend: string, emotion?: Message['emotion'], mediaInsight?: { description: string; emotion: string; suggestions: string[] }) => {
     if (!textToSend.trim()) return;
 
     const userMsgId = `msg-${Date.now()}`;
@@ -1753,7 +1753,16 @@ function AppContent() {
       // Inject emotion/media context into the prompt
       let contextualMessage = textToSend;
       if (emotion) {
-        contextualMessage += ` [Detected emotion: ${emotion.emotion}]`;
+        // The companion is told HOW this was known, because the two deserve
+        // different weight. A tremor heard in the voice can contradict the
+        // words outright — "I'm fine", said unsteadily — and the companion
+        // should be able to follow the voice rather than the sentence. A
+        // reading inferred from wording is only a restatement of what it can
+        // already see, so it is labelled as the weaker signal it is.
+        contextualMessage +=
+          emotion.source === 'voice'
+            ? ` [Heard in their voice: ${emotion.emotion}${emotion.tone ? ` — ${emotion.tone}` : ''}. This is how they SOUNDED, which may not match their words. Trust it over the wording if they differ.]`
+            : ` [Detected emotion: ${emotion.emotion}]`;
       }
       if (mediaInsight) {
         contextualMessage += ` [Media insight: ${mediaInsight.description}. Emotion: ${mediaInsight.emotion}]`;
@@ -2572,7 +2581,12 @@ function AppContent() {
 
                           {msg.emotion && (
                             <div className="mt-2">
-                              <EmotionBadge emotion={msg.emotion.emotion} confidence={msg.emotion.confidence} />
+                              <EmotionBadge
+                                emotion={msg.emotion.emotion}
+                                confidence={msg.emotion.confidence}
+                                source={msg.emotion.source}
+                                tone={msg.emotion.tone}
+                              />
                             </div>
                           )}
 

@@ -3,8 +3,18 @@ import { Mic, MicOff, AlertTriangle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useToast } from '../lib/ToastContext';
 
+export interface DetectedEmotion {
+  emotion: string;
+  confidence: number;
+  tone: string;
+  /** How it was known. 'voice' was heard in the audio — pace, tremor, breath;
+      'text' was inferred from the wording alone, which cannot tell a bright
+      "I'm fine" from a flat one. The badge says which. */
+  source?: 'voice' | 'text';
+}
+
 interface VoiceInputProps {
-  onTranscript: (text: string, emotion?: { emotion: string; confidence: number; tone: string }) => void;
+  onTranscript: (text: string, emotion?: DetectedEmotion) => void;
   disabled?: boolean;
   isPremium?: boolean;
 }
@@ -215,6 +225,7 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
     setIsAnalyzing(true);
     setAnalyzeStage('transcribe');
     let finalText = liveTranscriptRef.current.trim();
+    let heardTone: DetectedEmotion | null = null;
     try {
       // Whisper-grade pass — server picks the best configured provider.
       //
@@ -240,6 +251,12 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
             finalText = data.text.trim();
             setTranscript(finalText);
           }
+          // Heard rather than inferred: the provider listened to the delivery,
+          // not just the words. When it comes back the text-analysis call
+          // below is skipped entirely — it is the weaker reading of the two,
+          // and running it anyway would cost the patient a round trip to
+          // second-guess something better.
+          if (data.voice?.emotion) heardTone = data.voice as DetectedEmotion;
         }
         // 501/502 → keep the live-caption text; dictation still works.
       }
@@ -258,6 +275,14 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
       return;
     }
 
+    // Already know how they sounded — nothing left to ask.
+    if (heardTone) {
+      setIsAnalyzing(false);
+      onTranscript(finalText, heardTone);
+      setTranscript('');
+      return;
+    }
+
     setAnalyzeStage('emotion');
     try {
       const response = await fetch('/api/analyze-emotion', {
@@ -267,7 +292,8 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
       });
       if (!response.ok) throw new Error(`Emotion analysis failed: ${response.statusText}`);
       const emotion = await response.json();
-      onTranscript(finalText, emotion);
+      // Inferred from wording, and labelled as such. It cannot hear a tremor.
+      onTranscript(finalText, { ...emotion, source: 'text' });
       setTranscript('');
     } catch (err) {
       const msg = `Emotion analysis error: ${err instanceof Error ? err.message : 'Unknown error'}`;

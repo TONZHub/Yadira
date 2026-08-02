@@ -17,6 +17,12 @@ import {
 import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity';
 import { looksLikeSilence, cleanTranscript } from './transcription';
 import {
+  TRANSCRIBE_WITH_TONE_PROMPT,
+  TONE_ONLY_PROMPT,
+  parseTranscriptWithTone,
+  parseVocalTone,
+} from './vocalTone';
+import {
   placeHelpCall,
   withinCooldown,
   markCalled,
@@ -1037,6 +1043,29 @@ ${COMPANION_GUARDRAILS}`;
 //   3. Gemini          → audio transcription on the funded Gemini key
 //   4. none            → 501; the client falls back to the browser's own
 //      Web Speech recognition, so dictation never goes dark.
+/**
+ * How the voice sounded, when something other than Gemini did the words.
+ *
+ * Best-effort by definition: a failed tone read must cost the patient nothing
+ * — they still get their transcript — so every failure path here returns null
+ * quietly rather than propagating.
+ */
+async function readVocalTone(b64: string, mimeType: string) {
+  if (!genAI) return null;
+  try {
+    const r = await genAI.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: [
+        { role: 'user', parts: [{ inlineData: { mimeType, data: b64 } }, { text: TONE_ONLY_PROMPT }] },
+      ],
+    });
+    return parseVocalTone(r.text || '');
+  } catch (err: any) {
+    console.info('[Yadira] Vocal tone read failed (transcript unaffected):', err?.message || err);
+    return null;
+  }
+}
+
 app.post('/api/transcribe', async (req, res) => {
   const { audio, mimeType, durationMs, peakAmplitude } = req.body || {};
   if (!audio || typeof audio !== 'string') {
@@ -1083,10 +1112,21 @@ app.post('/api/transcribe', async (req, res) => {
       if (!text && (data.text || '').trim()) {
         console.info(`[Yadira] Dropped a transcription artifact: ${JSON.stringify(String(data.text).slice(0, 60))}`);
       }
-      return res.json({ text, provider: openaiKey ? 'openai-whisper' : 'groq-whisper' });
+      // Whisper returns words and nothing else — no pace, no tremor, no
+      // crying. If Gemini is also configured it can listen to the same audio
+      // for how it was said. Run alongside, never in sequence: the patient is
+      // waiting, and a tone reading is not worth a second round trip's delay.
+      const voice = text ? await readVocalTone(b64, type) : null;
+      return res.json({
+        text,
+        provider: openaiKey ? 'openai-whisper' : 'groq-whisper',
+        ...(voice ? { voice } : {}),
+      });
     }
 
     if (genAI) {
+      // One call, both answers. This replaces the old transcribe-then-analyse
+      // pair, so dictation gets a signal it never had AND gets faster.
       const response = await genAI.models.generateContent({
         model: GEMINI_MODEL,
         contents: [
@@ -1094,16 +1134,18 @@ app.post('/api/transcribe', async (req, res) => {
             role: 'user',
             parts: [
               { inlineData: { mimeType: type, data: b64 } },
-              { text: 'Transcribe this audio exactly as spoken, in the original language. Reply with ONLY the transcription text — no commentary, no quotes. If there is no intelligible speech, reply with an empty string.' },
+              { text: TRANSCRIBE_WITH_TONE_PROMPT },
             ],
           },
         ],
       });
-      const text = cleanTranscript(response.text || '');
-      if (!text && (response.text || '').trim()) {
-        console.info(`[Yadira] Dropped a transcription artifact: ${JSON.stringify(String(response.text).slice(0, 60))}`);
+      const { text: heard, tone } = parseTranscriptWithTone(response.text || '');
+      const text = cleanTranscript(heard);
+      if (!text && heard.trim()) {
+        console.info(`[Yadira] Dropped a transcription artifact: ${JSON.stringify(heard.slice(0, 60))}`);
       }
-      return res.json({ text, provider: 'gemini' });
+      // A tone attached to words we just threw away describes nothing.
+      return res.json({ text, provider: 'gemini', ...(text && tone ? { voice: tone } : {}) });
     }
 
     return res.status(501).json({ error: 'no_transcription_provider' });

@@ -66,6 +66,12 @@ is a different act.
 - **Photo album & memories** — real family photos with AI-written captions the
   caregiver can edit.
 - **Help button** — one tap that reaches a real human. See below.
+- **A companion that hears *how* it was said** — emotion used to be read from
+  the transcript, which meant "I'm fine" read as fine whether it was said
+  brightly, flatly, or through tears. Gemini takes the audio itself, so the
+  same call that transcribes also reports pace, steadiness, breath and effort.
+  The companion is told which signal it got and to trust the voice over the
+  wording when they disagree. See `src/server/vocalTone.ts`.
 - **Dictation that stays silent when they did** — Whisper-family models invent
   fluent text over silence rather than returning nothing, so a fumbled tap
   became words the patient never said. Recordings are checked for duration and
@@ -143,6 +149,7 @@ src/
     lucidity.ts        the terminal-lucidity tripwire
     textSafety.ts      reply hygiene: cleaning, brevity, frame integrity
     helpCall.ts        the help-button phone call
+    vocalTone.ts       how it sounded, not just what was said
     calleApi.ts        CALL-E Developer API transport
     auth.ts            Firebase ID token verification (RS256)
     stripe.ts          Caregiver Pro billing
@@ -161,7 +168,7 @@ before taking real customers.
 | Job | Provider |
 | --- | --- |
 | Companion conversation, drift, redirection | OpenRouter (`poolside/laguna-xs-2.1` by default) |
-| Routines, clinical insights, transcription | Gemini (`gemini-3.5-flash`) |
+| Routines, clinical insights, transcription **and vocal tone** | Gemini (`gemini-3.5-flash`) |
 | Family-photo analysis | Gemini pro-class (`gemini-3.5-pro`) — flash misses the detail that unlocks a memory |
 | Natural voice | Inworld TTS |
 | Phone calls | CALL-E |
@@ -186,7 +193,7 @@ mode; with no Firebase config it runs entirely on localStorage.
 npm run build             # client + bundled server
 npm start                 # serve on PORT (default 3000)
 npm run lint              # tsc --noEmit
-npm test                  # 148 tests, node:test
+npm test                  # 169 tests, node:test
 ```
 
 ### Configuration
@@ -243,7 +250,15 @@ Some of these look like limitations and are load-bearing:
   is used only for that — a familiar name in an unfamiliar voice is not the same
   person to someone whose recognition is failing.
 - **Mood is never guessed.** Where the patient said nothing clear, the record
-  says so. A fabricated wellbeing signal gets charted and acted on.
+  says so. A fabricated wellbeing signal gets charted and acted on. The vocal
+  tone read is held to the same rule: `unclear` is a first-class answer, a
+  low-confidence reading is dropped rather than shown weakly, and an emotion
+  outside the known set is refused rather than approximated.
+- **Heard is not measured.** A vocal tone reading is a model's impression of a
+  voice, with no clinical validation behind it, so it travels with its
+  provenance and the badge says "heard" — never implying it was measured. It
+  also never takes the transcript down with it: a malformed mood costs a
+  badge, not the patient's words.
 - **Distress checks are a union, not a delegation.** If either the provider's
   structured result *or* our own patterns see distress, the caregiver is told.
 - **Reply cleaning is never destructive.** If every heuristic fires and leaves
