@@ -40,6 +40,25 @@ const STALE_TOKEN_OK = new Set([
 const ANONYMOUS_OK = STALE_TOKEN_OK;
 
 /**
+ * Paths where an UNVERIFIABLE identity may still name a circle: none.
+ *
+ * Raised in review, and correct. The 'unverified' tier exists for a server
+ * that has never reached Google's signing certs — and in that state
+ * verifyFirebaseToken returns the uid straight out of an UNCHECKED payload.
+ * Both `aud` and `iss` are public constants, so anyone could craft a token
+ * naming another family's uid and be that family on every resilience path.
+ * That was true of all five before /calls/help-status joined them; adding a
+ * sixth is what made it worth noticing.
+ *
+ * Rejecting the tier outright is only safe because the resilience it was
+ * bought for now comes from somewhere better: the help alert is mirrored into
+ * the family's own Firestore circle by the client (see App.tsx), which does
+ * not route through this server at all. The tier was a workaround for a
+ * durability problem that has since been fixed properly.
+ */
+const UNVERIFIED_OK = new Set<string>();
+
+/**
  * Verify the caller's Firebase ID token and attach the identity to the
  * request. Mounted under /api, so req.path values look like "/chat".
  */
@@ -73,10 +92,13 @@ export const authMiddleware = async (
       return res.status(401).json({ error: 'Unauthorized: token expired' });
     }
 
-    // Signatures aren't currently enforceable (never reached Google's certs).
-    // Confine such requests to the resilience paths rather than letting an
-    // unverifiable identity spend money on the AI routes.
-    if (verified.tier === 'unverified' && !resilient) {
+    // Signatures aren't currently enforceable (never reached Google's certs),
+    // so this uid came out of a payload nobody checked. It must not be allowed
+    // to select a circle — see UNVERIFIED_OK above.
+    if (verified.tier === 'unverified' && !UNVERIFIED_OK.has(req.path)) {
+      console.warn(
+        `[Yadira Auth] Refusing an unverifiable identity on ${req.path} — no Google signing certs.`
+      );
       return res.status(503).json({ error: 'Authentication temporarily unavailable' });
     }
 

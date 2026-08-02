@@ -39,11 +39,23 @@ function lsKey(key: string): string {
 }
 
 function readLocal<T>(key: string, fallback: T): T {
+  return readLocalWithSource(key, fallback).value;
+}
+
+/**
+ * The same read, plus where the value came from.
+ *
+ * `stored` is what lets the snapshot rule tell "this family has never written
+ * anything" from "another device deleted everything while we were shut" — see
+ * src/lib/snapshotRule.ts.
+ */
+function readLocalWithSource<T>(key: string, fallback: T): { value: T; stored: boolean } {
   try {
     const saved = localStorage.getItem(lsKey(key));
-    return saved ? (JSON.parse(saved) as T) : fallback;
+    if (saved === null) return { value: fallback, stored: false };
+    return { value: JSON.parse(saved) as T, stored: true };
   } catch {
-    return fallback;
+    return { value: fallback, stored: false };
   }
 }
 
@@ -66,7 +78,12 @@ export function useStoreList<T extends Record<string, any>>(
   initial: T[],
   idField: keyof T = 'id' as keyof T
 ): [T[], (next: Updater<T>) => void, boolean] {
-  const [items, setItems] = useState<T[]>(() => readLocal(key, initial));
+  const initialRead = useRef<{ value: T[]; stored: boolean } | null>(null);
+  if (initialRead.current === null) initialRead.current = readLocalWithSource(key, initial);
+  const [items, setItems] = useState<T[]>(() => initialRead.current!.value);
+  // Whether this device has ever held real data for this key. Becomes true the
+  // moment we write, so a deletion elsewhere is authoritative from then on.
+  const localWasStored = useRef(initialRead.current.stored);
   // Ref mirror so functional updaters resolve against latest state
   const itemsRef = useRef(items);
   itemsRef.current = items;
@@ -103,12 +120,16 @@ export function useStoreList<T extends Record<string, any>>(
         // arriving just after a local write, was discarded as our own echo and
         // never resent. Firestore already labels its own pending writes;
         // asking it is both correct and free.
+        // `apply` already accounts for pending writes, so the extra early
+        // return that used to sit here was both redundant and wrong: it
+        // skipped marking the subscription as seen and settled, which left a
+        // later empty snapshot looking like a first one. Raised in review.
         const apply = shouldApplySnapshot({
           empty: snap.empty,
           hasPendingWrites: snap.metadata.hasPendingWrites,
           seenSnapshot: seenSnapshot.current,
+          localWasStored: localWasStored.current,
         });
-        if (snap.metadata.hasPendingWrites) return; // our own write, still in flight
         if (apply) {
           const remote = snap.docs.map((d) => d.data() as T);
           setItems(remote);
@@ -140,6 +161,7 @@ export function useStoreList<T extends Record<string, any>>(
       const next = typeof updater === 'function' ? updater(prev) : updater;
       setItems(next);
       writeLocal(key, next); // always mirror locally
+      localWasStored.current = true;
 
       if (isFirebaseConfigured && db) {
         try {
@@ -186,9 +208,12 @@ export function useStoreDoc<T extends Record<string, any>>(
   key: string,
   initial: T
 ): [T, (next: T) => void, boolean] {
-  const [value, setValue] = useState<T>(() => readLocal(key, initial));
+  const initialRead = useRef<{ value: T; stored: boolean } | null>(null);
+  if (initialRead.current === null) initialRead.current = readLocalWithSource(key, initial);
+  const [value, setValue] = useState<T>(() => initialRead.current!.value);
   const [synced, setSynced] = useState(false);
   const seenSnapshot = useRef(false);
+  const localWasStored = useRef(initialRead.current.stored);
   const circleId = getCircleId();
 
   useEffect(() => {
@@ -203,19 +228,25 @@ export function useStoreDoc<T extends Record<string, any>>(
       (snap) => {
         // Same rule as the list store — skip only our OWN in-flight write,
         // never a real remote change that arrived just after it.
-        if (!shouldApplySnapshot({
+        const apply = shouldApplySnapshot({
           empty: !snap.exists(),
           hasPendingWrites: snap.metadata.hasPendingWrites,
           seenSnapshot: seenSnapshot.current,
-        })) {
-          seenSnapshot.current = true;
-          setSynced(true);
-          return;
-        }
-        if (snap.exists()) {
-          const remote = snap.data() as T;
-          setValue(remote);
-          writeLocal(key, remote);
+          localWasStored: localWasStored.current,
+        });
+        if (apply) {
+          if (snap.exists()) {
+            const remote = snap.data() as T;
+            setValue(remote);
+            writeLocal(key, remote);
+          } else {
+            // A document that USED to exist and now does not is a deletion,
+            // and the list store's bug had a twin here: `snap.exists()` was
+            // the only branch, so the deleted doc stayed in state and in the
+            // local mirror and never left this device. Raised in review.
+            setValue(initial);
+            writeLocal(key, initial);
+          }
         }
         seenSnapshot.current = true;
         setSynced(true);
@@ -241,6 +272,7 @@ export function useStoreDoc<T extends Record<string, any>>(
     (next: T) => {
       setValue(next);
       writeLocal(key, next);
+      localWasStored.current = true;
 
       if (isFirebaseConfigured && db) {
         try {

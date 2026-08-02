@@ -1017,12 +1017,27 @@ function AppContent() {
   // timestamp wins, which keeps both directions honest: a restarted server
   // reporting nothing cannot clear a live alert, and a stale synced doc cannot
   // resurrect one the caregiver has already acknowledged.
-  const [helpAlertDoc, setHelpAlertDoc] = useStoreDoc<{ active: boolean; at: number }>(
-    'helpAlert',
-    { active: false, at: 0 }
-  );
+  const [helpAlertDoc, setHelpAlertDoc] = useStoreDoc<{
+    active: boolean;
+    at: number;
+    /**
+     * What the caregiver said on the phone. Durable for the same reason the
+     * alert is: it lived only in the server's memory, so a restart turned a
+     * "no, I can't get there" back into "unknown" — and the companion resumed
+     * telling the patient someone was on their way. Raised in review.
+     */
+    canGetThere?: 'yes' | 'no' | 'unknown';
+  }>('helpAlert', { active: false, at: 0 });
   const helpAlertDocRef = useRef(helpAlertDoc);
   helpAlertDocRef.current = helpAlertDoc;
+
+  // What the caregiver said on the phone when asked whether they can get
+  // there. 'no' is the one that changes what the companion may say: promising
+  // that someone is on their way, after that someone has said they cannot
+  // come, is the same false reassurance as an unlinked device — and this one
+  // is worse, because it is contradicted by a person who actually answered.
+  const [canGetThere, setCanGetThere] = useState<'yes' | 'no' | 'unknown'>('unknown');
+
 
   // Vivid invite flow — tracks how many times each name is mentioned by the
   // patient within the current session (resets on new session / family switch).
@@ -1036,8 +1051,11 @@ function AppContent() {
     setCaregiverAlertState(state);
     localStorage.setItem('yadira_caregiver_alert', JSON.stringify(state));
     // The durable copy. Written first so a request that never lands still
-    // reaches the caregiver's device through the circle.
-    setHelpAlertDoc(state);
+    // reaches the caregiver's device through the circle. A newly raised alert
+    // clears the previous call's answer: it is a fresh question, and the old
+    // "no" must not silence a caregiver who can come this time.
+    setHelpAlertDoc({ ...state, canGetThere: active ? 'unknown' : helpAlertDoc.canGetThere });
+    if (active) setCanGetThere('unknown');
     fetch('/api/caregiver-alert', {
       method: 'POST',
       headers: authHeaders(),
@@ -1063,7 +1081,10 @@ function AppContent() {
   // server is the thing that is down.
   useEffect(() => {
     setCaregiverAlertState((prev) => (helpAlertDoc.at > prev.at ? helpAlertDoc : prev));
-  }, [helpAlertDoc.active, helpAlertDoc.at]);
+    if (helpAlertDoc.canGetThere && helpAlertDoc.canGetThere !== 'unknown') {
+      setCanGetThere(helpAlertDoc.canGetThere);
+    }
+  }, [helpAlertDoc.active, helpAlertDoc.at, helpAlertDoc.canGetThere]);
 
   // ---- Terminal lucidity alert ----
   // Raised when the chat endpoint detects a window of real clarity in the
@@ -1113,7 +1134,15 @@ function AppContent() {
             // Server vs. the circle's durable copy — newest wins. A server that
             // has just restarted answers {active:false, at:0}, which must not
             // be allowed to silence an alert Firestore still knows about.
-            if (typeof data?.canGetThere === 'string') setCanGetThere(data.canGetThere);
+            if (typeof data?.canGetThere === 'string' && data.canGetThere !== 'unknown') {
+              setCanGetThere(data.canGetThere);
+              // Straight into the circle, so a server restart cannot turn it
+              // back into "unknown" and resume the arrival promise.
+              const stored = helpAlertDocRef.current;
+              if (stored.canGetThere !== data.canGetThere) {
+                setHelpAlertDoc({ ...stored, canGetThere: data.canGetThere });
+              }
+            }
             const fromServer = { active: data.active as boolean, at: (data.at as number) || 0 };
             const stored = helpAlertDocRef.current;
             const winner = stored.at > fromServer.at ? stored : fromServer;
@@ -1180,13 +1209,6 @@ function AppContent() {
   // it worked, and that is the moment they most need to hear a voice. The
   // caregiver's phone is not rung again — that is the cooldown, and it is
   // right — but the person in the room is answered every single time.
-  // What the caregiver said on the phone when asked whether they can get
-  // there. 'no' is the one that changes what the companion may say: promising
-  // that someone is on their way, after that someone has said they cannot
-  // come, is the same false reassurance as an unlinked device — and this one
-  // is worse, because it is contradicted by a person who actually answered.
-  const [canGetThere, setCanGetThere] = useState<'yes' | 'no' | 'unknown'>('unknown');
-
   const repeatComfortRef = useRef(0);
   const handlePatientAlert = () => {
     const name = caregiverName || 'Your caregiver';
@@ -1205,9 +1227,16 @@ function AppContent() {
     // the disorientation this app exists to prevent — and they would sit and
     // wait on it. The unlinked lines give the one thing that is still true:
     // presence.
-    const firstTime = helpReachesCaregiver
-      ? `${name} has been told, ${dear}. They will come to you soon. I'm right here with you until then.`
-      : `I'm right here with you, ${dear}. You're not on your own — I'm staying right here.`;
+    // Raised in review, and right: a caregiver who said "no" and then cleared
+    // the banner leaves the NEXT press looking like a first one, which took
+    // the arrival promise straight back. The last thing we were told still
+    // stands until a new call says otherwise.
+    const nobodyComing = helpReachesCaregiver && canGetThere === 'no';
+    const firstTime = !helpReachesCaregiver
+      ? `I'm right here with you, ${dear}. You're not on your own — I'm staying right here.`
+      : nobodyComing
+        ? `${name} knows, ${dear}. I'm right here with you.`
+        : `${name} has been told, ${dear}. They will come to you soon. I'm right here with you until then.`;
     // When the caregiver has answered the phone and said they cannot get
     // there, "they're on their way" becomes a lie told to someone who will sit
     // and wait on it. These lines drop the arrival and keep everything that is
@@ -1215,7 +1244,6 @@ function AppContent() {
     // companion is not going anywhere. Nothing here says nobody is coming —
     // that is the caregiver's news to give, not a sentence to leave with
     // someone alone in a room.
-    const nobodyComing = helpReachesCaregiver && canGetThere === 'no';
     const againOptions = nobodyComing
       ? [
           `${name} knows, ${dear}. I'm staying right here with you in the meantime.`,

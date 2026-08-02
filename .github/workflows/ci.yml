@@ -30,6 +30,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # actions/checkout stores the workflow token in .git/config by
+          # default, where `npm ci` lifecycle scripts and every later step can
+          # read it. Nothing here pushes, so nothing here needs it.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:

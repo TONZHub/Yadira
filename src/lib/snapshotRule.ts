@@ -12,12 +12,21 @@ export interface SnapshotFacts {
   hasPendingWrites: boolean;
   /** Have we already received a snapshot for this subscription? */
   seenSnapshot: boolean;
+  /**
+   * Did the local value come from localStorage, rather than being the
+   * untouched built-in seed?
+   *
+   * This is the difference between the two things an empty first snapshot can
+   * mean, and without it the rule guesses. See below.
+   */
+  localWasStored: boolean;
 }
 
 export function shouldApplySnapshot({
   empty,
   hasPendingWrites,
   seenSnapshot,
+  localWasStored,
 }: SnapshotFacts): boolean {
   // Our own optimistic write echoing back. The previous guard was a single
   // boolean that skipped the NEXT snapshot whatever it held — so a genuine
@@ -26,14 +35,22 @@ export function shouldApplySnapshot({
   // pending writes; asking it is both correct and free.
   if (hasPendingWrites) return false;
 
-  // An empty remote collection is ambiguous exactly once. On the FIRST
-  // snapshot it means "this family has never written anything" — apply it and
-  // the local seed is wiped before they have touched anything. On any later
-  // snapshot it means the last item was deleted, and NOT applying it is how a
-  // deletion fails to cross devices and then gets resurrected by the other
-  // device's next write. A deletion that comes back is worse than one that
-  // simply fails.
-  if (empty && !seenSnapshot) return false;
+  // A later empty snapshot is unambiguous: something was there and now is not.
+  if (!empty || seenSnapshot) return true;
 
-  return true;
+  // An empty FIRST snapshot is the hard case, and it has two causes:
+  //
+  //   · This family has never written anything. Applying it would wipe the
+  //     sample family the caregiver just chose, before they touched it.
+  //   · Another device deleted everything while this one was offline or shut.
+  //     NOT applying it leaves stale items here — and this device's next write
+  //     puts them back for the whole family. A deletion that comes back is
+  //     worse than one that simply fails.
+  //
+  // `seenSnapshot` alone cannot tell those apart, which is a gap this rule
+  // shipped with and review caught. What separates them is where the local
+  // value came from: the built-in seed means nothing has ever been written
+  // here, while a value read out of localStorage means this device HAS held
+  // real data — so an authoritative empty cloud is news, not absence.
+  return localWasStored;
 }
