@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { Mic, MicOff, AlertTriangle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useToast } from '../lib/ToastContext';
+import { readSpeechResults } from '../lib/speechTranscript';
 
 export interface DetectedEmotion {
   emotion: string;
@@ -84,18 +85,14 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
-    let finalTranscript = '';
+    // Rebuilt from event.results each time, never accumulated — see
+    // src/lib/speechTranscript.ts. The appending version of this produced a
+    // transcript that restated itself with every word in a live call.
     recognition.onstart = () => {
-      finalTranscript = '';
+      liveTranscriptRef.current = '';
     };
     recognition.onresult = (event: any) => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const text = event.results[i][0].transcript;
-        if (event.results[i].isFinal) finalTranscript += text + ' ';
-        else interim += text;
-      }
-      const full = (finalTranscript + interim).trim();
+      const full = readSpeechResults(event.results).text;
       liveTranscriptRef.current = full;
       setTranscript(full);
     };
