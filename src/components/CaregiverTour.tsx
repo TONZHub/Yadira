@@ -11,7 +11,7 @@ import { X, ArrowLeft, ArrowRight, Phone, Lock, Tent, Sparkles, Users } from 'lu
 //
 // The steps are ordered by what goes wrong when nobody explains it, not by
 // what is most impressive. The two that have actually bitten a real family in
-// testing — the escalation number and the padlock handover — come first.
+// testing — the escalation number and the device handover — come first.
 
 export interface TourStep {
   icon: React.ReactNode;
