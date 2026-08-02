@@ -211,7 +211,7 @@ mode; with no Firebase config it runs entirely on localStorage.
 npm run build             # client + bundled server
 npm start                 # serve on PORT (default 3000)
 npm run lint              # tsc --noEmit
-npm test                  # 233 tests, node:test
+npm test                  # 241 tests, node:test
 ```
 
 ### Configuration
@@ -314,6 +314,10 @@ Some of these look like limitations and are load-bearing:
 | [calle/FEEDBACK.md](calle/FEEDBACK.md) | What building on CALL-E surfaced, measured on live calls |
 | [SPONSORS.md](SPONSORS.md) | Why sponsorship keeps this free for families |
 | [docs/demo/](docs/demo/) | Demo reel script, FAQ video script, camera-ready seeding |
+
+CI runs `npm run lint`, `npm test` and a production build on every pull
+request, and boots the bundled server to prove it answers — a bundle that
+compiles but throws on start is a green tick and a dead deploy.
 
 ## License
 

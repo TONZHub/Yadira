@@ -28,6 +28,12 @@ const STALE_TOKEN_OK = new Set([
   '/aurora-mode',
   '/caregiver-alert',
   '/lucidity-alert',
+  // The readout for the alert above. index.ts always claimed it followed "the
+  // same resilience rules as the alert routes it sits beside" — it did not,
+  // so a caregiver whose token had aged out got the help alert but a 401
+  // where the explanation should be. The one screen that says whether their
+  // phone is going to ring is a poor place to go dark.
+  '/calls/help-status',
 ]);
 
 /** These same paths stay reachable with no Authorization header at all. */

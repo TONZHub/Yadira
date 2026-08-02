@@ -21,6 +21,7 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { db, isFirebaseConfigured, getCircleId } from './firebase';
+import { shouldApplySnapshot } from './snapshotRule';
 
 // ---------- shared localStorage helpers ----------
 // Keys are namespaced by care circle so two accounts sharing one browser
@@ -54,6 +55,7 @@ function writeLocal<T>(key: string, value: T) {
   }
 }
 
+
 // ---------- LIST store (memories, faqs, logs, routine) ----------
 // Items MUST have a stable `id` field (logs use `date` — see idField).
 
@@ -69,8 +71,11 @@ export function useStoreList<T extends Record<string, any>>(
   const itemsRef = useRef(items);
   itemsRef.current = items;
   const [synced, setSynced] = useState(false);
-  // Guard so our own writes don't loop back through the snapshot listener
-  const pendingWrite = useRef(false);
+  // An empty remote collection is ambiguous on the FIRST snapshot: it means
+  // either "this family has never written anything" (keep the local seed) or
+  // "they deleted the last item" (apply it). Only the second is a deletion,
+  // and only a snapshot after the first can be one.
+  const seenSnapshot = useRef(false);
 
   // The family's isolated circle — resolved per mount, so it always reflects
   // the account that's actually signed in (AppContent remounts on login).
@@ -92,15 +97,24 @@ export function useStoreList<T extends Record<string, any>>(
     const unsub = onSnapshot(
       colRef,
       (snap) => {
-        if (pendingWrite.current) {
-          pendingWrite.current = false;
-          return;
-        }
-        if (!snap.empty) {
+        // Our own optimistic write echoing back through the local listener.
+        // This replaces a single boolean that skipped the NEXT snapshot
+        // whatever it contained — so a genuine change from the other device,
+        // arriving just after a local write, was discarded as our own echo and
+        // never resent. Firestore already labels its own pending writes;
+        // asking it is both correct and free.
+        const apply = shouldApplySnapshot({
+          empty: snap.empty,
+          hasPendingWrites: snap.metadata.hasPendingWrites,
+          seenSnapshot: seenSnapshot.current,
+        });
+        if (snap.metadata.hasPendingWrites) return; // our own write, still in flight
+        if (apply) {
           const remote = snap.docs.map((d) => d.data() as T);
           setItems(remote);
           writeLocal(key, remote); // keep local cache warm for offline
         }
+        seenSnapshot.current = true;
         setSynced(true);
       },
       (err) => {
@@ -128,7 +142,6 @@ export function useStoreList<T extends Record<string, any>>(
       writeLocal(key, next); // always mirror locally
 
       if (isFirebaseConfigured && db) {
-        pendingWrite.current = true;
         try {
           const batch = writeBatch(db);
           // Items removed from the list must have their Firestore docs deleted
@@ -175,7 +188,7 @@ export function useStoreDoc<T extends Record<string, any>>(
 ): [T, (next: T) => void, boolean] {
   const [value, setValue] = useState<T>(() => readLocal(key, initial));
   const [synced, setSynced] = useState(false);
-  const pendingWrite = useRef(false);
+  const seenSnapshot = useRef(false);
   const circleId = getCircleId();
 
   useEffect(() => {
@@ -188,8 +201,15 @@ export function useStoreDoc<T extends Record<string, any>>(
     const unsub = onSnapshot(
       docRef,
       (snap) => {
-        if (pendingWrite.current) {
-          pendingWrite.current = false;
+        // Same rule as the list store — skip only our OWN in-flight write,
+        // never a real remote change that arrived just after it.
+        if (!shouldApplySnapshot({
+          empty: !snap.exists(),
+          hasPendingWrites: snap.metadata.hasPendingWrites,
+          seenSnapshot: seenSnapshot.current,
+        })) {
+          seenSnapshot.current = true;
+          setSynced(true);
           return;
         }
         if (snap.exists()) {
@@ -197,6 +217,7 @@ export function useStoreDoc<T extends Record<string, any>>(
           setValue(remote);
           writeLocal(key, remote);
         }
+        seenSnapshot.current = true;
         setSynced(true);
       },
       (err) => {
@@ -222,7 +243,6 @@ export function useStoreDoc<T extends Record<string, any>>(
       writeLocal(key, next);
 
       if (isFirebaseConfigured && db) {
-        pendingWrite.current = true;
         try {
           const clean = JSON.parse(JSON.stringify(next));
           setDoc(doc(db, 'careCircles', circleId, 'meta', key), clean).catch(
