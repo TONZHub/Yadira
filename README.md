@@ -126,20 +126,22 @@ The call confirms who answered *before* disclosing anything, says only who asked
 for them and when, and never rings twice for repeated presses. Full design in
 [`calle/`](calle/), which also holds the reusable Agent Skill.
 
-**One setup step decides whether any of it works:** on the patient's device,
-sign in with the caregiver's account and then press the padlock — **Care
-Lock** — to hand it over. *Do not log out.* If you only want the role screen
-back, the **hand-over** button beside the padlock does that while keeping you
-signed in; until it existed, logging out was the only way there, which meant
-the obvious path to handing a device over was also the one that broke it. The circle id is the account's
-uid, so the account staying on the device is the only thing putting it in the
-family's circle; log out and the patient button becomes a demo in a circle of its own, where
-the alert reaches nobody and there is no number to ring. The role screen names
-the account it is actually carrying — "Signed in as ruth@example.com" — because
-a claim you can check beats one you have to trust, and a leftover demo token
-used to be enough to make the device say it was connected. The app also warns
-in the caregiver's help-call card and in the logout confirmation itself — and an unlinked device never tells the patient that someone has been
-told and is coming. A promise nobody can keep is worse than silence.
+**One setup step decides whether any of it works.** On the patient's device,
+sign in with the caregiver's account, then press **hand over** in the header
+and let them tap "I'm a Patient". *Never log out on that device.* A circle id
+is the account's uid, so the account staying put is the only thing placing the
+device in the family's circle — and until hand-over existed, Log out was the
+only route back to the role screen, which made the obvious way to hand a
+device over the same as the way that broke it. Add **Care Lock** (the padlock)
+for a tablet that stays with them: it hides every caregiver control and
+survives a restart.
+
+Two things keep this honest rather than hoped-for. The role screen names the
+account it is actually carrying — "Signed in as ruth@example.com" — because a
+claim you can check beats one you have to trust, and a leftover demo token
+used to be enough to make a device say it was connected. And an unlinked
+device never tells the patient that someone has been told and is coming. A
+promise nobody can keep is worse than silence.
 
 ---
 

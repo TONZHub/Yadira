@@ -57,13 +57,16 @@ const CaregiverTour: React.FC<CaregiverTourProps> = ({ patientName, onClose, onO
       title: 'Handing over their tablet',
       body: (
         <>
-          On {them}&rsquo;s own device: sign in as <i>you</i>, then press the <b>padlock</b> in the
-          header. That pins it to the companion and hides every caregiver control, so a stray
-          touch cannot reach anything.
+          On {them}&rsquo;s own device, sign in as <i>you</i> first — your account staying on it is
+          the only thing connecting their help button to your phone. Then use <b>hand over</b> in
+          the header and let them tap <b>I&rsquo;m a Patient</b>.
           <span className="block mt-2">
-            <b>Do not log out on that device.</b> Your account staying on it is the only thing
-            connecting their help button to your phone — logging out is what breaks it. If you
-            only want the role screen back, use the hand-over button beside the padlock.
+            For a tablet that lives with them, add the <b>padlock</b> too: it pins the screen to the
+            companion and hides every caregiver control, so a stray touch cannot reach anything.
+          </span>
+          <span className="block mt-2">
+            <b>Never log out on that device.</b> That is the one action that disconnects it — and
+            it looks like an ordinary sign-out, which is why it catches people.
           </span>
         </>
       ),

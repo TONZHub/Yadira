@@ -3658,11 +3658,11 @@ function AppContent() {
                       <b className="block mb-0.5">
                         {profile.patientName || 'Their'} device has to stay signed in to this account.
                       </b>
-                      On their tablet: sign in as <i>you</i>, then press the <b>padlock</b> in the header to
-                      turn on Care Lock and hand it over. The device stays in your circle, and the caregiver
-                      controls disappear so a stray touch cannot reach them. To hand a device over without
-                      locking it, use the <b>hand-over</b> button beside it — that returns to the role screen
-                      while keeping you signed in.
+                      On their tablet: sign in as <i>you</i>, then press <b>hand over</b> in the header.
+                      That returns to the role screen with your account still on the device, so when they
+                      tap <b>I'm a Patient</b> they land inside your circle. Add the <b>padlock</b>
+                      (Care Lock) as well for a device that stays with them — it hides the caregiver
+                      controls so a stray touch cannot reach them.
                       <span className="block mt-1">
                         <b>Do not log out first.</b> Logging out is what disconnects the device — after it,
                         the patient button becomes <b>Try the companion</b> — a demo whose help button never

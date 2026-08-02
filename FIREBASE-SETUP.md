@@ -104,12 +104,21 @@ This follows directly from "the circle id IS the uid", and it is the one
 step nothing in the app can do on the family's behalf:
 
 > **Sign in on the patient's device with the caregiver's account, then press
-> the padlock (Care Lock) to hand it over. Do not log out.**
+> "hand over" in the header. Do not log out.**
 
-Care Lock is the supported handover. It pins the device to the patient view,
-hides the tab switcher and the logout button so no destructive control is
-reachable by a stray touch, and goes full screen — all while the caregiver's
-account stays on the device, which is the part that matters here.
+Hand over clears the session's *role* and nothing else: the sessionStorage
+marker goes, the token and uid stay. It returns to the role screen still
+signed in, so when the patient taps "I'm a Patient" they inherit the
+caregiver's uid and land inside the family's circle.
+
+Before it existed, the only route to that screen was Log out — which is why
+the obvious way to hand a device over was also the way that broke it.
+
+**Care Lock** (the padlock) is the extra step for a tablet that stays with the
+patient, not the mechanism. It pins the device to the patient view, hides the
+tab switcher and the logout button so no destructive control is reachable by a
+stray touch, and goes full screen. It also survives a restart, so the tablet
+comes back into the companion rather than into a login screen.
 
 **Logging out is what breaks the link**, and it does not look like it. Once
 the account is gone the patient button becomes "Try the companion", which mints
@@ -124,7 +133,7 @@ The app now says so at each of the three points where it can:
 
 | Where | What it says |
 | --- | --- |
-| Role screen, no account on the device | Sign in first, then use the padlock |
+| Role screen, no account on the device | Sign in first, then hand over |
 | Caregiver's help-call card | The handover, and "do not log out first" |
 | The logout confirmation itself | Logging out disconnects this device |
 
