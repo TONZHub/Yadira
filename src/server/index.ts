@@ -34,6 +34,12 @@ import {
   getOutcome,
   cooldownRemaining,
 } from './helpCall';
+import {
+  placeBriefingCall,
+  withinBriefingCooldown,
+  markBriefed,
+  clearBriefingCooldown,
+} from './briefingCall';
 
 dotenv.config();
 
@@ -401,6 +407,53 @@ app.post('/api/calls/test', async (req, res) => {
     const detail = String(err?.message || err).slice(0, 200);
     recordOutcome(circle, 'failed', `Test call could not be placed: ${detail}`);
     console.warn('[Yadira CALL-E] test call failed:', detail);
+    res.status(502).json({ error: detail });
+  }
+});
+
+// Ask Yadira, by phone — the caregiver dashboard delivered down a phone line,
+// for the caregiver who is driving, at work, or awake at two in the morning.
+//
+// Pro-only, and not for the usual reason. It costs a call every time, yes, but
+// it is also the clearest answer to "why is this worth more than a companion
+// that talks to my mother": a companion keeps her company, this one rings YOU.
+app.post('/api/calls/briefing', async (req, res) => {
+  const circle = circleOf(req);
+  const toPhone = String(req.body?.toPhone || '').trim();
+
+  if (!toPhone) {
+    return res.status(400).json({ error: 'Save your phone number in Settings first.' });
+  }
+  if (req.body?.isPremium !== true) {
+    return res.status(402).json({
+      error: 'Yadira calling you with the week is part of Caregiver Pro.',
+    });
+  }
+  if (withinBriefingCooldown(circle)) {
+    return res.status(429).json({ error: 'Yadira is already calling you — check your phone.' });
+  }
+  // Claimed BEFORE dialling, so a second tap while the first is connecting
+  // cannot ring twice. Released on failure, or the next tap is answered with
+  // a sentence that is not true.
+  markBriefed(circle);
+
+  try {
+    const briefing = String(req.body?.briefing || '').trim();
+    const result = await placeBriefingCall({
+      toPhone,
+      patientName: String(req.body?.patientName || 'your loved one'),
+      caregiverName: req.body?.caregiverName ? String(req.body.caregiverName) : undefined,
+      briefing,
+      region: req.body?.region ? String(req.body.region) : undefined,
+      at: Date.now(),
+    });
+    recordOutcome(circle, 'placed', `Briefing call — ${result.summary}`);
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    clearBriefingCooldown(circle);
+    const detail = String(err?.message || err).slice(0, 200);
+    recordOutcome(circle, 'failed', `Briefing call could not be placed: ${detail}`);
+    console.warn('[Yadira CALL-E] briefing call failed:', detail);
     res.status(502).json({ error: detail });
   }
 });
