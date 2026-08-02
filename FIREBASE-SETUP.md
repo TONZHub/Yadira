@@ -103,22 +103,34 @@ and authenticated; the demo still works.
 This follows directly from "the circle id IS the uid", and it is the one
 step nothing in the app can do on the family's behalf:
 
-> **Sign in on the patient's device with the caregiver's account, then tap
-> "I'm a Patient".** Patient mode inherits whatever account is on the device.
+> **Sign in on the patient's device with the caregiver's account, then press
+> the padlock (Care Lock) to hand it over. Do not log out.**
 
-Tapping "I'm a Patient" on a device nobody has signed in on mints a local
-session of its own instead. It looks identical, but it is a different circle:
-the help button raises an alert the caregiver never receives, the escalation
-number saved on the caregiver's device is not there, and the circle is on
-nobody's subscription — so the CALL-E phone call has neither a number to ring
-nor a Pro entitlement to ring it with. This is why the same help button
-"works in Preview Patient View and not on the patient's tablet".
+Care Lock is the supported handover. It pins the device to the patient view,
+hides the tab switcher and the logout button so no destructive control is
+reachable by a stray touch, and goes full screen — all while the caregiver's
+account stays on the device, which is the part that matters here.
 
-The app now says so in three places rather than leaving it to be discovered:
-the role screen warns before the tap, the caregiver's help-call card spells
-out the handover, and — since a promise nobody can keep is worse than
-silence — an unlinked patient session never tells the patient that someone
-has been told and is coming. See `src/lib/localSession.ts`.
+**Logging out is what breaks the link**, and it does not look like it. Once
+the account is gone, "I'm a Patient" mints a local session in a circle of its
+own. It looks identical, but the help button raises an alert the caregiver
+never receives, the escalation number saved on the caregiver's device is not
+there, and the circle is on nobody's subscription — so the CALL-E call has
+neither a number to ring nor a Pro entitlement to ring it with. This is why
+the same help button "works in Preview Patient View and not on the patient's
+tablet".
+
+The app now says so at each of the three points where it can:
+
+| Where | What it says |
+| --- | --- |
+| Role screen, no account on the device | Sign in first, then use the padlock |
+| Caregiver's help-call card | The handover, and "do not log out first" |
+| The logout confirmation itself | Logging out disconnects this device |
+
+And since a promise nobody can keep is worse than silence, an unlinked
+patient session never tells the patient that someone has been told and is
+coming. See `src/lib/localSession.ts`.
 
 ## Step 7 — Server-side token verification (built)
 

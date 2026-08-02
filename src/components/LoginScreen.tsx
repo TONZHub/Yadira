@@ -214,9 +214,9 @@ export const LoginScreen: React.FC = () => {
               <div className="rounded-xl border border-[#E3DFC2] bg-[#FCFAF5] p-3.5 text-left">
                 <p className="text-xs text-[#5A594F] leading-relaxed">
                   <span className="font-bold text-[#2C2C2A]">Setting up the patient's own device?</span>{' '}
-                  Sign in with the caregiver's account first, then hand it over. That is what
-                  connects the help button to you — without it this device runs on its own, and
-                  nothing it raises reaches your phone.
+                  Sign in with the caregiver's account, then press the <b>padlock</b> in the header to
+                  hand it over. Staying signed in is what connects the help button to you — tapping
+                  below instead starts a session of its own, and nothing it raises reaches your phone.
                 </p>
                 <button
                   type="button"

@@ -122,14 +122,15 @@ The call confirms who answered *before* disclosing anything, says only who asked
 for them and when, and never rings twice for repeated presses. Full design in
 [`calle/`](calle/), which also holds the reusable Agent Skill.
 
-**One setup step decides whether any of it works:** sign in on the patient's
-device with the caregiver's account, *then* tap "I'm a Patient". Patient mode
-inherits the account on the device, and the circle id is that account's uid —
-so a device nobody signed in on lands in a circle of its own, where the alert
-reaches nobody and there is no number to ring. The app now warns before that
-tap, explains the handover in the caregiver's help-call card, and an unlinked
-device never tells the patient that someone has been told and is coming. A
-promise nobody can keep is worse than silence.
+**One setup step decides whether any of it works:** on the patient's device,
+sign in with the caregiver's account and then press the padlock — **Care
+Lock** — to hand it over. *Do not log out.* The circle id is the account's
+uid, so the account staying on the device is the only thing putting it in the
+family's circle; log out and "I'm a Patient" starts a session of its own where
+the alert reaches nobody and there is no number to ring. The app warns on the
+role screen, in the caregiver's help-call card, and in the logout confirmation
+itself — and an unlinked device never tells the patient that someone has been
+told and is coming. A promise nobody can keep is worse than silence.
 
 ---
 

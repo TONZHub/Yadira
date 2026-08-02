@@ -2323,9 +2323,15 @@ function AppContent() {
             <button
               id="btn-logout"
               onClick={async () => {
+                // Logging out is what unlinks a patient's device, and it does
+                // not look like it. The account on the device is the ONLY
+                // thing putting it in your care circle: without it the help
+                // button raises an alert nobody receives. Said here because
+                // this is the moment it happens, and because the alternative
+                // — Care Lock — is one button away and does the job properly.
                 const message = isPatientSession
                   ? 'Return to the Yadira login screen? (Caregiver use only)'
-                  : 'Log out of Yadira and return to the login screen?';
+                  : `Log out of Yadira and return to the login screen?\n\nIf this is ${patientName || 'the patient'}'s own device, logging out disconnects it from your care circle — their help button will stop reaching you.\n\nTo hand the device over instead, cancel and use the padlock (Care Lock).`;
                 if (window.confirm(message)) {
                   await logout();
                 }
@@ -3538,11 +3544,16 @@ function AppContent() {
                         it is signed in to this same account. */}
                     <div className="mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border border-[#E3DFC2] bg-[#FCFAF5] text-[#5E5D57]">
                       <b className="block mb-0.5">
-                        {profile.patientName || 'Their'} device has to be signed in to this account.
+                        {profile.patientName || 'Their'} device has to stay signed in to this account.
                       </b>
-                      Open Yadira on their tablet, sign in as <i>you</i>, then tap <b>I'm a Patient</b> and
-                      hand it over. Tapping <b>I'm a Patient</b> on a device nobody has signed in on starts a
-                      demo instead — it looks identical, and the help button on it will never reach you.
+                      On their tablet: sign in as <i>you</i>, then press the <b>padlock</b> in the header to
+                      turn on Care Lock and hand it over. The device stays in your circle, and the caregiver
+                      controls disappear so a stray touch cannot reach them.
+                      <span className="block mt-1">
+                        <b>Do not log out first.</b> Logging out is what disconnects the device — after it,
+                        tapping <b>I'm a Patient</b> starts a demo that looks identical and whose help button
+                        never reaches you.
+                      </span>
                     </div>
                     {helpCallStatus && (
                       <div
