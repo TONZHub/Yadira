@@ -110,6 +110,21 @@ export function markCalled(circle: string, now = Date.now()): void {
   lastCallAt.set(circle, now);
 }
 
+/**
+ * Give the cooldown back after a call that never happened.
+ *
+ * The cooldown has to be claimed BEFORE dialling — the call is
+ * fire-and-forget, so a second press arriving while the first is still
+ * connecting would otherwise ring the caregiver twice. But when the call then
+ * fails outright (bad number, CALL-E unreachable, no key), holding the
+ * cooldown means the next ten minutes of presses are answered with "Already
+ * called you recently, so this press did not ring again" — which is false,
+ * on the one feature in this app that must never say something false.
+ */
+export function clearCooldown(circle: string): void {
+  lastCallAt.delete(circle);
+}
+
 /** Test seam — the cooldown is process-wide state. */
 export function __resetCooldowns(): void {
   lastCallAt.clear();

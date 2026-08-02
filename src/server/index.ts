@@ -17,6 +17,7 @@ import {
 import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity';
 import { looksLikeSilence, cleanTranscript } from './transcription';
 import { isDevRequest, devModeAvailable, DEV_MODE_NOTE } from './devMode';
+import { checkAiBudget, type BudgetTier } from './aiBudget';
 import {
   TRANSCRIBE_WITH_TONE_PROMPT,
   TONE_ONLY_PROMPT,
@@ -27,6 +28,7 @@ import {
   placeHelpCall,
   withinCooldown,
   markCalled,
+  clearCooldown,
   recordOutcome,
   getOutcome,
   cooldownRemaining,
@@ -41,6 +43,46 @@ app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
 // Apply auth middleware to all /api routes
 app.use('/api/', authMiddleware);
+
+// A daily ceiling on the routes that spend money. See src/server/aiBudget.ts
+// for why a small local allowance is the shape of the fix: the local-demo
+// token is unsigned by necessity, so a hand-written one is accepted, and
+// every route below bills a real provider.
+const AI_ROUTES = new Set([
+  '/chat',
+  '/transcribe',
+  '/analyze-media',
+  '/analyze-emotion',
+  '/insights/summarize',
+  '/routine/generate',
+  '/caregiver/chat',
+  '/hattie/chat',
+  '/drift/proactive',
+  '/session/reflect',
+]);
+
+app.use('/api/', (req, res, next) => {
+  if (!AI_ROUTES.has(req.path)) return next();
+  const authed = req as AuthenticatedRequest;
+  // 'stale' and 'unverified' never reach these routes (auth.ts confines them
+  // to the resilience paths), so anything arriving here is verified or local.
+  const tier: BudgetTier = authed.authTier === 'verified' ? 'verified' : 'local';
+  const ip =
+    (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
+  const verdict = checkAiBudget(circleOf(authed), ip, tier, Date.now());
+  if (verdict.allowed) return next();
+
+  console.warn(
+    `[Yadira] AI budget reached (${verdict.reason}) for ${req.path} — tier ${tier}.`
+  );
+  // 429 with a sentence the companion's caller can show. Deliberately not a
+  // hard failure in the UI: the client already degrades to simulation replies
+  // and the device voice when a route is unavailable.
+  return res.status(429).json({
+    error:
+      'Daily allowance for AI features reached. It resets at midnight UTC. If this is unexpected, sign in — signed-in families get a much larger allowance.',
+  });
+});
 
 // Fetch Google's token-signing certificates now rather than on the first
 // request, so no family's first message pays for the round trip.
@@ -246,6 +288,10 @@ app.post('/api/caregiver-alert', async (req, res) => {
         })
         .catch((err) => {
           const detail = String(err?.message || err).slice(0, 200);
+          // Hand the cooldown back. It was claimed before dialling so a second
+          // press could not ring twice; a call that never connected has not
+          // earned ten minutes of "we already called you".
+          clearCooldown(circle);
           recordOutcome(circle, 'failed', `The call could not be placed: ${detail}`);
           console.warn('[Yadira CALL-E] help call failed:', detail);
         });

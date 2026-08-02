@@ -205,7 +205,7 @@ mode; with no Firebase config it runs entirely on localStorage.
 npm run build             # client + bundled server
 npm start                 # serve on PORT (default 3000)
 npm run lint              # tsc --noEmit
-npm test                  # 206 tests, node:test
+npm test                  # 224 tests, node:test
 ```
 
 ### Configuration
@@ -282,6 +282,17 @@ Some of these look like limitations and are load-bearing:
   badge, not the patient's words.
 - **Distress checks are a union, not a delegation.** If either the provider's
   structured result *or* our own patterns see distress, the caregiver is told.
+- **The AI routes have a daily ceiling.** The local-demo token is unsigned by
+  necessity — it exists for deployments with no Firebase Auth — so a
+  hand-written one is accepted, and every paid route accepted it. Circle
+  isolation always held; the exposure was the bill. Demo circles now get a
+  small allowance, signed-in families a large one, and a per-IP backstop
+  catches anyone rotating uids. See `src/server/aiBudget.ts`.
+- **The help alert is not only in memory.** The server keeps it in a Map for a
+  fast cross-device hand-off, but that is exactly as durable as one process:
+  a redeploy or an idle wake used to drop it *after* the patient had been told
+  someone was coming. Firestore holds the truth, the server stays the fast
+  path, newest timestamp wins.
 - **Reply cleaning is never destructive.** If every heuristic fires and leaves
   nothing, the original text is returned — an over-eager filter once blanked real
   replies.
