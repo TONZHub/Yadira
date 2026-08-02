@@ -2994,13 +2994,24 @@ function AppContent() {
                       </p>
                     </div>
                   </div>
-                  <div className="flex flex-col items-end gap-2 shrink-0">
-                    <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${isPremium ? 'bg-[#3A5D45] text-white' : 'bg-[#EAE8DD] text-[#7E7D76]'}`}>
-                      {isPremium ? 'Pro' : `${Math.max(0, CAREGIVER_CHAT_FREE_LIMIT - (aiUsage.caregiverChatCount || 0))} free left`}
-                    </span>
-                    {/* The same thing, in the medium a caregiver can actually
-                        use while driving. Reading a dashboard requires sitting
-                        at one; a phone call does not. */}
+                  <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${isPremium ? 'bg-[#3A5D45] text-white' : 'bg-[#EAE8DD] text-[#7E7D76]'}`}>
+                    {isPremium ? 'Pro' : `${Math.max(0, CAREGIVER_CHAT_FREE_LIMIT - (aiUsage.caregiverChatCount || 0))} free left`}
+                  </span>
+                </div>
+
+                {/* Ask Yadira, away from the screen.
+                    These first shipped as two 11px outline buttons stacked in
+                    the header corner under the status badge. They rendered at
+                    every width — measured — and were still missed by the person
+                    who asked for the feature, who received the weekly email
+                    without ever finding the button that sends it. A control
+                    nobody can find is not a shipped feature, so it gets a row,
+                    a heading, and room to say what it does. */}
+                <div className="px-5 sm:px-6 py-3.5 bg-[#FCFAF5] border-b border-[#EFECDD]">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-[#7E7D76] mb-2">
+                    Not at your desk?
+                  </p>
+                  <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
                       id="btn-briefing-call"
@@ -3011,9 +3022,9 @@ function AppContent() {
                           ? 'Yadira calls your phone and tells you how the week went'
                           : 'Save your phone number in Settings first'
                       }
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#3A5D45] text-[#3A5D45] text-[11px] font-bold hover:bg-[#F2FAF4] transition-all active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#3A5D45] text-white text-sm font-bold hover:bg-[#2B4633] shadow-xs transition-all active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
                     >
-                      <Phone className="w-3.5 h-3.5" />
+                      <Phone className="w-4 h-4 shrink-0" />
                       {briefingCalling ? 'Calling you…' : 'Call me with the week'}
                     </button>
                     <button
@@ -3021,12 +3032,16 @@ function AppContent() {
                       id="btn-briefing-email"
                       onClick={() => sendBriefingEmail(false)}
                       title="Send the week to your inbox now"
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#E3DFC2] text-[#5E5D57] text-[11px] font-bold hover:bg-[#F4F1EA] transition-all active:scale-95"
+                      className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-white border border-[#E3DFC2] text-[#5E5D57] text-sm font-bold hover:bg-[#F4F1EA] transition-all active:scale-95"
                     >
-                      <Mail className="w-3.5 h-3.5" />
+                      <Mail className="w-4 h-4 shrink-0" />
                       Email me the week
                     </button>
                   </div>
+                  <p className="text-[11px] text-[#A6A27B] mt-2 leading-snug">
+                    Yadira reads you {patientName || 'their'} week down the phone, or sends it to your
+                    inbox. The email also arrives on its own once a week.
+                  </p>
                 </div>
 
                 <div ref={caregiverLogRef} className="px-5 sm:px-6 py-4 space-y-3 overflow-y-auto min-h-[180px] max-h-[360px]">
