@@ -18,6 +18,7 @@ import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity'
 import { looksLikeSilence, cleanTranscript } from './transcription';
 import { isDevRequest, devModeAvailable, DEV_MODE_NOTE } from './devMode';
 import { checkAiBudget, type BudgetTier } from './aiBudget';
+import { knownPremium } from './premiumRegistry';
 import {
   TRANSCRIBE_WITH_TONE_PROMPT,
   TONE_ONLY_PROMPT,
@@ -66,15 +67,34 @@ app.use('/api/', (req, res, next) => {
   const authed = req as AuthenticatedRequest;
   // 'stale' and 'unverified' never reach these routes (auth.ts confines them
   // to the resilience paths), so anything arriving here is verified or local.
-  const tier: BudgetTier = authed.authTier === 'verified' ? 'verified' : 'local';
+  // Pro circles get the old generous ceiling; free ones get a ceiling sized
+  // to a normal day. `knownPremium` returns undefined when this process has
+  // not seen a Stripe call for the circle today — that reads as free, which
+  // is the safe direction: the client re-verifies its subscription on load,
+  // so a paying family repopulates the registry the moment they open the app.
+  const circleId = circleOf(authed);
+  const tier: BudgetTier =
+    authed.authTier !== 'verified' ? 'local' : knownPremium(circleId) ? 'pro' : 'verified';
   const ip =
     (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
-  const verdict = checkAiBudget(circleOf(authed), ip, tier, Date.now());
+  const verdict = checkAiBudget(circleId, ip, tier, Date.now());
   if (verdict.allowed) return next();
 
   console.warn(
     `[Yadira] AI budget reached (${verdict.reason}) for ${req.path} — tier ${tier}.`
   );
+
+  // The companion itself never 429s. "The companion is free, always" is a
+  // promise printed in Settings, the Terms modal and the README, and a
+  // patient meeting an allowance message is that promise breaking in the one
+  // place it matters. The route serves a simulation reply instead — the same
+  // fallback an outage already produces — so the conversation continues,
+  // just without the model behind it. Everything else (reports, caregiver
+  // chat, emotion analysis) is caregiver-facing and can be told plainly.
+  if (req.path === '/chat') {
+    (req as any).aiBudgetExhausted = true;
+    return next();
+  }
   // 429 with a sentence the companion's caller can show. Deliberately not a
   // hard failure in the UI: the client already degrades to simulation replies
   // and the device voice when a route is unavailable.
@@ -510,8 +530,36 @@ async function openRouterChat(
   }
 
   const data = await response.json();
+
+  // What this exchange actually cost, in tokens.
+  //
+  // A stress test put a family at $6.10/week and there was no way to see
+  // where it went. The system prompt is ~364 tokens, so it is not the prompt;
+  // the suspect is `maxTokens` — 1500 of output budget for a reply trimmed to
+  // four sentences, spent by a reasoning model on private deliberation that
+  // bills at output rates and is then thrown away. `reasoning_tokens` is the
+  // number that settles it, and it costs nothing to print.
+  const usage = data.usage;
+  if (usage) {
+    const reasoned = usage.completion_tokens_details?.reasoning_tokens;
+    console.info(
+      `[Yadira cost] prompt=${usage.prompt_tokens} completion=${usage.completion_tokens}` +
+        (reasoned != null ? ` (reasoning=${reasoned})` : '') +
+        ` total=${usage.total_tokens}`
+    );
+  }
+
   const content = data.choices?.[0]?.message?.content;
   const cleaned = cleanModelOutput(content || '');
+
+  // The model spent the whole reply thinking and never got to the words —
+  // either it ran out of budget mid-scratchpad, or the entire response was
+  // one reasoning block. cleanModelOutput strips that to nothing on purpose.
+  // Routing to the simulation fallback gets a reply that reads the patient's
+  // actual message, which is better than the flat generic line.
+  if (content && !cleaned) {
+    throw new Error('Model returned only reasoning scratchpad — routing to simulation fallback.');
+  }
 
   // Detect content-safety classifier responses (e.g. "safe", "unsafe", "User Safety: safe").
   // These come from nvidia/nemotron-3.5-content-safety which openrouter/free sometimes routes to.
@@ -532,6 +580,15 @@ async function openRouterChat(
 // Reply hygiene (cleanModelOutput, breaksCharacter, trimToSentences) and the
 // terminal-lucidity tripwire live in their own modules so they can be tested
 // directly — see textSafety.test.ts and lucidity.test.ts.
+
+// How much conversation is resent with every message.
+//
+// Was 12. Every turn is re-uploaded on every exchange, on top of the memories,
+// the gallery captions and the persona file, and the companion's continuity
+// does not actually come from here — Session Memory carries what matters
+// across a visit. Eight keeps the thread of the current exchange without
+// paying for the whole visit each time someone speaks.
+const HISTORY_TURNS = Number(process.env.CHAT_HISTORY_TURNS) || 8;
 
 // Empathic System Instruction for Yadira
 // Distilled dementia-care practice woven into the companion's behavior:
@@ -1048,7 +1105,7 @@ ${COMPANION_GUARDRAILS}`;
     const openRouterMessages: { role: 'user' | 'assistant'; content: string }[] = [];
 
     if (history && Array.isArray(history)) {
-      for (const chatTurn of history.slice(-12)) {
+      for (const chatTurn of history.slice(-HISTORY_TURNS)) {
         const role = chatTurn.role === 'user' ? 'user' : 'assistant';
         // Skip leading assistant turns — must start with user
         if (openRouterMessages.length === 0 && role === 'assistant') continue;
@@ -1058,6 +1115,16 @@ ${COMPANION_GUARDRAILS}`;
 
     // Add the current user message
     openRouterMessages.push({ role: 'user', content: message });
+
+    // Out of daily allowance: skip the model, keep the companion talking.
+    if ((req as any).aiBudgetExhausted) {
+      return res.json({
+        reply: getSimulationReply(message, isVivid, personaName, memories, caregiverSettings, todayDateStr, lucidity),
+        fallbackTriggered: true,
+        mentionedNames: [],
+        lucidity,
+      });
+    }
 
     // Call OpenRouter — use 1500 tokens so reasoning models have enough budget to produce a response
     let reply = await openRouterChat(fullSystemInstruction, openRouterMessages, 1500);
@@ -2030,7 +2097,11 @@ Respond ONLY with the JSON object, no markdown fences.`,
 // so cap synthesis per care circle and per IP each day. Generous for real use
 // (~30k chars ≈ 200+ spoken replies) but bounds what an abusive script can
 // burn. In-memory — resets on deploy/restart, which is fine for protection.
-const TTS_DAILY_CIRCLE_CHARS = 30000;
+// Same split as the AI ceiling above: a paying family never meets it, a free
+// one gets enough for a normal day's replies and then falls back to the
+// device voice — which the client already handles on a 429.
+const TTS_DAILY_CIRCLE_PRO = Number(process.env.TTS_DAILY_PRO) || 30000;
+const TTS_DAILY_CIRCLE_FREE = Number(process.env.TTS_DAILY_FREE) || 5000;
 const TTS_DAILY_IP_CHARS = 100000; // higher: a care facility NAT is one IP, many families
 const ttsUsage = new Map<string, { day: string; chars: number }>();
 
@@ -2055,7 +2126,11 @@ app.post('/api/tts', async (req, res) => {
 
     const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() || req.ip || 'unknown';
     if (
-      ttsBudgetExceeded(`circle:${circleOf(req)}`, text.length, TTS_DAILY_CIRCLE_CHARS) ||
+      ttsBudgetExceeded(
+        `circle:${circleOf(req)}`,
+        text.length,
+        knownPremium(circleOf(req)) ? TTS_DAILY_CIRCLE_PRO : TTS_DAILY_CIRCLE_FREE
+      ) ||
       ttsBudgetExceeded(`ip:${ip}`, text.length, TTS_DAILY_IP_CHARS)
     ) {
       // 429 → the client's speakText catch falls back to the device voice,

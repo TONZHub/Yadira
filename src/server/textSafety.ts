@@ -29,6 +29,54 @@ const PREAMBLE_PATTERNS: RegExp[] = [
 const META_LINE_PATTERN =
   /^(?:we need to (?:craft|write|produce|generate|respond|reply|keep|make)|i need to (?:craft|write|produce|generate|respond|reply)|let me (?:craft|rephrase|reconsider|check the|see how i)|i['’]?ll (?:craft|rephrase|produce|generate|go with|keep it under|write)|i will (?:craft|produce|generate|write)|step \d+[:.]|note:|option \d+[:.]|here is (?:the|a|my) (?:message|response|reply)|here['’]?s (?:the|a|my) (?:message|response|reply)|(?:the|this) (?:message|response|reply) (?:should|must|needs|will|is going)|(?:craft|produce|output|write) (?:a|an|the) (?:message|response|reply|sentence)|final (?:answer|message|response):)/i;
 
+// The chat model is a reasoning model, and reasoning models write their
+// scratchpad into the reply inside tags. Usually the provider strips them;
+// when it doesn't, the tag reaches the screen — a patient in call mode saw a
+// bare "</think>" — and the speech synthesiser reads it aloud.
+//
+// Both delimiter styles in the wild: the XML-ish `<think>` used by most, and
+// the `◁think▷` variant some models emit.
+const REASONING_PAIR =
+  /(?:<\s*(think|thinking|reasoning|reflection)\s*>[\s\S]*?<\s*\/\s*\1\s*>|◁\s*think\s*▷[\s\S]*?◁\s*\/\s*think\s*▷)/gi;
+const REASONING_CLOSE = /<\s*\/\s*(?:think|thinking|reasoning|reflection)\s*>|◁\s*\/\s*think\s*▷/gi;
+const REASONING_OPEN = /<\s*(?:think|thinking|reasoning|reflection)\s*>|◁\s*think\s*▷/i;
+
+/**
+ * Remove a reasoning model's scratchpad, leaving only what it meant to say.
+ *
+ * Returns '' when nothing is left, and that is deliberate — see the note on
+ * `cleanModelOutput`'s never-destructive rule. Scratchpad reaching a patient
+ * is worse than the generic fallback line, so this is the one filter allowed
+ * to come back empty-handed.
+ */
+export function stripReasoningBlocks(raw: string): string {
+  if (!raw) return '';
+  let text = raw;
+
+  // Well-formed blocks first. A space, not '', so two blocks either side of a
+  // word don't fuse it to its neighbours.
+  text = text.replace(REASONING_PAIR, ' ');
+
+  // An orphan CLOSING tag means the opening one was consumed upstream — the
+  // provider stripped it, or the model never wrote it. Everything before the
+  // last one is scratchpad; the reply is what follows.
+  let lastClose = -1;
+  for (const match of text.matchAll(REASONING_CLOSE)) {
+    lastClose = match.index + match[0].length;
+  }
+  if (lastClose > -1) text = text.slice(lastClose);
+
+  // An orphan OPENING tag means the model was still thinking when its token
+  // budget ran out. There is no reply after it, only an unfinished thought.
+  const open = text.search(REASONING_OPEN);
+  if (open > -1) text = text.slice(0, open);
+
+  // Collapse the gaps a removed block leaves behind, but NOT newlines: the
+  // planning-line filter downstream works line by line, and flattening the
+  // reply to one line silently disarms it.
+  return text.replace(/[^\S\n]+/g, ' ').trim();
+}
+
 /**
  * Strip reasoning-model meta-commentary from a reply.
  *
@@ -36,11 +84,18 @@ const META_LINE_PATTERN =
  * fires and leaves nothing behind, the original text is returned instead. An
  * over-eager filter used to blank the reply entirely, and the patient got
  * "I am here with you, dear." in place of what the companion actually said.
+ *
+ * The single exception is the reasoning scratchpad above. Falling back to a
+ * warm generic line is a small loss; reading a model's private planning to
+ * someone with dementia — in their own companion's voice — is a real one.
  */
 export function cleanModelOutput(raw: string): string {
   if (!raw) return '';
 
-  const original = raw.trim();
+  const spoken = stripReasoningBlocks(raw);
+  if (!spoken) return '';
+
+  const original = spoken.trim();
   let text = original;
 
   for (const pattern of PREAMBLE_PATTERNS) {
