@@ -50,6 +50,7 @@ import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, Diges
 import type { FamilyPackApply } from './components';
 import type { RoomId } from './lib/sensoryRooms';
 import { AuthProvider, useAuth } from './lib/AuthContext';
+import { devToken, setDevToken, clearDevToken, registerTap, type TapState } from './lib/devMode';
 import { ToastProvider, useToast } from './lib/ToastContext';
 import { DEMO_MEMORIES, DEMO_FAQS, DEMO_LOGS, DEMO_ROUTINE } from './lib/demoData';
 import { playMemorySoundscape } from './lib/soundscapes';
@@ -162,6 +163,34 @@ function AppContent() {
   // first-run copy and the skip-the-confirm behaviour only apply here.
   const [firstRunSetup, setFirstRunSetup] = useState(false);
   const [showTour, setShowTour] = useState(false);
+  // Developer mode. The frame-integrity work made the companion impossible to
+  // interrogate — which is correct for a patient and useless for whoever is
+  // testing it. Seven taps on the hub's logo asks for the secret; the server
+  // refuses unless DEV_MODE_SECRET is configured there and matches, so on any
+  // deployment nobody has deliberately configured this cannot be entered at
+  // all. The logo only renders on the Caregiver Hub, so the gesture is not
+  // merely hidden from the patient's screen — it is not on it.
+  const [devActive, setDevActive] = useState(() => !!devToken());
+  const devTapRef = useRef<TapState>({ count: 0, lastAt: 0 });
+  const handleLogoTap = () => {
+    if (isPatientSession || careLocked) return;
+    const { next, opened } = registerTap(devTapRef.current, Date.now());
+    devTapRef.current = next;
+    if (!opened) return;
+    const secret = window.prompt(
+      'Developer mode\n\nThis turns OFF the protections that keep the companion in character — it is for testing, never for a session with a patient.\n\nEnter the developer secret (DEV_MODE_SECRET on the server). Leave blank to cancel.'
+    );
+    if (!secret) return;
+    setDevToken(secret.trim());
+    setDevActive(true);
+    toastSuccess('Developer mode on', 'Character protections are off for this browser session. Close the tab to end it.');
+  };
+  const endDevMode = () => {
+    clearDevToken();
+    setDevActive(false);
+    toastSuccess('Developer mode off', 'The companion is back in character.');
+  };
+
 
   // Auth headers for API requests that must fail *silently* (drift, reflection)
   // — apiCall below raises a toast on failure, which is wrong for background
@@ -1828,6 +1857,9 @@ function AppContent() {
         body: JSON.stringify({
           message: contextualMessage,
           history: serverHistory,
+          // Only ever present while developer mode is on, and the server
+          // ignores it unless DEV_MODE_SECRET is configured there and matches.
+          devToken: devToken() || undefined,
           caregiverSettings,
           patientMode,
           representedPersona,
@@ -2223,6 +2255,7 @@ function AppContent() {
               src="/yadira-logo.png"
               alt="Yadira"
               id="app-logo-icon"
+              onClick={handleLogoTap}
               className="w-[52px]"
             />
             <span className="hidden sm:inline-block text-xs font-semibold px-2 py-0.5 rounded-full bg-[#E8F1EB] text-[#3A5D45] uppercase tracking-wider border border-[#CEDFCF]">
@@ -2464,6 +2497,26 @@ function AppContent() {
             setCaregiverTab('settings');
           }}
         />
+      )}
+
+      {/* Developer mode is LOUD. A protection that is silently absent is worse
+          than one that was never there, because everyone downstream still
+          believes in it. Rendered above everything, on every screen, for as
+          long as it lasts — including the patient view, because if this is
+          somehow on while a patient is using the device that is exactly when
+          somebody needs to notice. */}
+      {devActive && (
+        <div className="fixed top-0 inset-x-0 z-[60] bg-amber-500 text-amber-950 px-4 py-2 flex items-center justify-center gap-3 text-xs sm:text-sm font-bold shadow-md">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>Developer mode — the companion is not protected from breaking character. Not for use with a patient.</span>
+          <button
+            id="btn-end-dev-mode"
+            onClick={endDevMode}
+            className="shrink-0 px-3 py-1 rounded-full bg-amber-950 text-amber-50 font-bold hover:bg-amber-900 transition-colors"
+          >
+            Turn off
+          </button>
+        </div>
       )}
 
       {/* Aurora full-screen overlay — rendered above everything */}

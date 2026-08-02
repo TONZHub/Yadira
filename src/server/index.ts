@@ -16,6 +16,7 @@ import {
 } from './textSafety';
 import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity';
 import { looksLikeSilence, cleanTranscript } from './transcription';
+import { isDevRequest, devModeAvailable, DEV_MODE_NOTE } from './devMode';
 import {
   TRANSCRIBE_WITH_TONE_PROMPT,
   TONE_ONLY_PROMPT,
@@ -820,7 +821,13 @@ function formatPersonaFileContext(personaFile: any, personaName: string): string
 
 // Endpoint for chatting with Yadira
 app.post('/api/chat', async (req, res) => {
-  const { message, history, caregiverSettings, memories, patientMode, representedPersona, personaFile, todaysMood, galleryCaptions } = req.body;
+  const { message, history, caregiverSettings, memories, patientMode, representedPersona, personaFile, todaysMood, galleryCaptions, devToken } = req.body;
+
+  // Developer mode: the character armour off, deliberately. Impossible unless
+  // DEV_MODE_SECRET is configured AND this request presents it — see
+  // src/server/devMode.ts for why it is locked that hard.
+  const devMode = isDevRequest(devToken);
+  if (devMode) console.info('[Yadira] Developer mode — frame integrity off for this reply.');
 
   if (!message) {
     return res.status(400).json({ error: 'Message is required' });
@@ -972,7 +979,16 @@ ${COMPANION_GUARDRAILS}`;
     // final word. Verbosity isn't a style problem here; it's a care problem.
     const brevityAnchor = `\n\nFINAL RULE — BREVITY IS CARE: Reply in at most 3 short sentences (roughly 40 words total). One thought per sentence. A long reply overwhelms; a short, warm one invites them to keep talking. Only run longer when they explicitly ask for a story — and even then, stay under 6 short sentences.`;
 
-    const fullSystemInstruction = `${activeSystemInstruction}\n\nPATIENT-SPECIFIC CONTEXT:\n${contextAugmentation || 'No specific context provided.'}${brevityAnchor}`;
+    // Developer mode swaps the staying-in-character block for a note that lets
+    // the companion answer plainly about itself. Everything else in the prompt
+    // — validation-first, brevity, harm refusal — is untouched: those are not
+    // what makes testing impossible, and removing them would make this a
+    // different product rather than a testable one.
+    const characterRules = devMode
+      ? activeSystemInstruction.split(COMPANION_GUARDRAILS).join(DEV_MODE_NOTE)
+      : activeSystemInstruction;
+
+    const fullSystemInstruction = `${characterRules}\n\nPATIENT-SPECIFIC CONTEXT:\n${contextAugmentation || 'No specific context provided.'}${brevityAnchor}`;
 
     // Build OpenAI-compatible messages array from history
     const openRouterMessages: { role: 'user' | 'assistant'; content: string }[] = [];
@@ -999,7 +1015,11 @@ ${COMPANION_GUARDRAILS}`;
     // honest reply the guidance asks for may pierce the frame on purpose —
     // swapping it for an in-character redirect would gaslight a clear person
     // back into the fiction, which is the one thing this product must never do.
-    if (!lucidity && breaksCharacter(reply)) {
+    // Developer mode joins lucidity as a reason to let an out-of-character
+    // reply through. Both are cases where the honest answer is the point, and
+    // substituting a warm redirect would be the wrong thing — gaslighting in
+    // one case, and an untestable product in the other.
+    if (!lucidity && !devMode && breaksCharacter(reply)) {
       console.warn('[Yadira Backend] Reply broke character (possible jailbreak) — substituting an in-character redirect.');
       reply = getSimulationReply(message, isVivid, personaName, memories, caregiverSettings, todayDateStr);
     }

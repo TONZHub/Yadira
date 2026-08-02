@@ -205,7 +205,7 @@ mode; with no Firebase config it runs entirely on localStorage.
 npm run build             # client + bundled server
 npm start                 # serve on PORT (default 3000)
 npm run lint              # tsc --noEmit
-npm test                  # 180 tests, node:test
+npm test                  # 206 tests, node:test
 ```
 
 ### Configuration
@@ -218,6 +218,7 @@ npm test                  # 180 tests, node:test
 | `GEMINI_MODEL` | Override the Gemini model. Defaults to `gemini-3.5-flash` on both routes. |
 | `GEMINI_VISION_MODEL` | Photo analysis. Defaults to the pro sibling of `GEMINI_MODEL`; falls back to `GEMINI_MODEL` if that name doesn't exist. |
 | `GEMINI_BASE_URL` | Point Gemini at a local stand-in for testing. Empty in production. |
+| `DEV_MODE_SECRET` | Enables developer mode (character protections off, for testing). Unset = impossible to enter. |
 | `GEMINI_ENTERPRISE_API_KEY` / `GOOGLE_CLOUD_PROJECT` | Route Gemini through the Enterprise Agent Platform instead. |
 | `INWORLD_API_KEY` | Natural voice. Without it, the device voice. |
 | `CALLE_API_KEY` | The help button rings a phone. Without it, the alert still raises. |
