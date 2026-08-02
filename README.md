@@ -158,8 +158,11 @@ process.
 
 ```
 src/
-  App.tsx              the app — patient view and caregiver hub
-  components/          patient-facing UI, sensory rooms, Hattie
+  App.tsx              state, effects, and the shell that wires them together
+  components/
+    PatientView.tsx    the patient's whole screen
+    hub/               the caregiver hub's tabs — settings, today, memories
+    ...                sensory rooms, Hattie, call mode, modals
   lodge/               Hattie's Lodge (the caregiver's own space)
   lib/                 auth, per-circle store, theme, sound, demo data
   server/
