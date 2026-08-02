@@ -355,15 +355,26 @@ const SettingsTab: React.FC<SettingsTabProps> = (props) => {
             {testingCall ? 'Calling you…' : 'Send me a test call'}
           </button>
           <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
-            Hear it once now, so you know what it sounds like — and so you can save the number as a
-            contact. The test says plainly that nothing is wrong.
+            Hear it once now, so you know what it sounds like. The test says plainly that nothing is
+            wrong.
           </span>
           <span className="text-[10px] text-[#7E7D76] leading-tight mt-2 block">
             The call says only that {profile.patientName || 'they'} asked for you, and when. It never
-            discusses their health, and repeated presses will not ring you over and over. It comes from
-            an unfamiliar number — worth saving as a contact once you have seen it, so it is not
-            silenced at four in the morning.
+            discusses their health, and repeated presses will not ring you over and over.
           </span>
+          {/* The number is NOT stable — three test calls came from three
+              different area codes. Telling a caregiver to save it as a contact
+              was advice that could not work, and worse, advice that would
+              leave them believing they were covered. What actually protects
+              them is the phone setting, which works whatever number calls. */}
+          <div className="mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border border-amber-200 bg-amber-50/60 text-[#5E5D57]">
+            <b className="block mb-0.5">The number changes every time — do not rely on saving it.</b>
+            Yadira calls from a different number each time, so it cannot be added as a contact. If
+            your phone silences or filters unknown callers, turn that off, or a real call at four in
+            the morning will never reach you. <span className="block mt-1">iPhone: Settings → Apps →
+            Phone → <i>Silence Unknown Callers</i>, off. Android: Phone app → Settings → <i>Caller ID
+            &amp; spam</i>, off.</span>
+          </div>
           {/* The one setup step nothing else can do for them. A test
               call proves this number rings; it proves nothing about
               the tablet in the other room, which reaches you only if

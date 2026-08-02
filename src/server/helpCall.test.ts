@@ -227,9 +227,20 @@ describe('the test call is unmistakably a test', () => {
     assert.ok(ask > -1 && ask < anythingElse);
   });
 
-  test('tells them to save the number, which is the point of testing', () => {
-    assert.match(goal, /worth saving as a contact/);
-    assert.match(goal, /not silenced as an unknown number/);
+  test('it does NOT tell them to save the number, because there is none to save', () => {
+    // Three consecutive test calls arrived from three different area codes —
+    // 504, 832, 214. CALL-E rotates the caller ID, so "save this as a contact"
+    // was advice that could not work, and worse, advice that would leave a
+    // caregiver believing they were covered when nothing had changed.
+    assert.doesNotMatch(goal, /worth saving as a contact/i);
+    assert.doesNotMatch(goal, /save (this|the) number/i);
+  });
+
+  test('it tells them the thing that actually protects them instead', () => {
+    // A phone setting works whatever number calls, which is the only kind of
+    // advice that survives a rotating caller ID.
+    assert.match(goal, /different number each time/i);
+    assert.match(goal, /silences unknown callers/i);
   });
 
   test('is explicitly not to be delivered in an alarmed tone', () => {

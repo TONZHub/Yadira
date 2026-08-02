@@ -212,7 +212,7 @@ export function buildTestCallGoal(req: HelpCallRequest): string {
     `2. If they say no, or you are not certain it is ${caregiver}: say only "Sorry to have troubled you. Goodbye," and end the call. Say nothing else and name nobody.`,
     `3. Once they confirm, say immediately: "This is only a test — nothing is wrong, and ${req.patientName} is fine. You asked to hear what a help-button call sounds like."`,
     '4. Then say: "If they ever press the help button, I will call you like this and tell you they are asking for you."',
-    '5. Tell them this number is worth saving as a contact, so a real call is not silenced as an unknown number.',
+    '5. Tell them plainly: "I call from a different number each time, so there is no number to save. If your phone silences unknown callers, please turn that off — otherwise a real call might never reach you." Do not suggest saving this number; it will not be the one that calls next time.',
     '6. Thank them and end the call.',
     '',
     'Throughout:',

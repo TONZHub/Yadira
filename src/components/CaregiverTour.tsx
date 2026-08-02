@@ -46,8 +46,12 @@ const CaregiverTour: React.FC<CaregiverTourProps> = ({ patientName, onClose, onO
           phone. The call needs one thing from you: your own number, in{' '}
           <b>Settings → Call me when they need me</b>.
           <span className="block mt-2">
-            Send yourself a test call while you are there. It arrives from an unfamiliar number —
-            worth saving as a contact now, so it is not silenced at four in the morning.
+            Send yourself a test call while you are there, so you know what it sounds like.
+          </span>
+          <span className="block mt-2">
+            <b>The number is different every time</b>, so it cannot be saved as a contact. What does
+            matter: if your phone silences unknown callers, turn that off — otherwise a real call at
+            four in the morning never reaches you.
           </span>
         </>
       ),

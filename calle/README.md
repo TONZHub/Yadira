@@ -61,10 +61,14 @@ local `.env` (already gitignored — never commit it).
 Caregiver hub → **Settings** → **Call me when they need me** → **Send me a test
 call**. It rings your own phone and says plainly that nothing is wrong.
 
-Worth doing once at setup, for two reasons that are not obvious: you learn what
-the call sounds like before the night it matters, and you see the number it
-comes from — which is unfamiliar, and worth saving as a contact so a real call
-is not silenced.
+Worth doing once at setup so you learn what the call sounds like before the
+night it matters.
+
+It deliberately does NOT tell you to save the number. Three consecutive test
+calls arrived from three different area codes (see [FEEDBACK.md](FEEDBACK.md)),
+so there is no number to save — CALL-E rotates the caller ID. The call says so,
+and points at the setting that actually works: turn off your phone's "silence
+unknown callers", because you cannot allowlist what you cannot predict.
 
 The test never claims the patient pressed anything. A caregiver who hears a
 drill worded like the real thing either panics, or learns that these calls are
