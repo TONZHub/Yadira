@@ -1,17 +1,23 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, getAdditionalUserInfo, Auth } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from './firebase';
+import { isUnlinkedPatientCircle, localUid, parseJwtPayload, UNLINKED_PATIENT_EMAIL } from './localSession';
 
 interface AuthContextType {
   user: { uid: string; email: string | null } | null;
   token: string | null;
   sessionRole: 'caregiver' | 'patient';
+  /** True when this is a patient session that never joined a care circle, so
+      nothing it raises leaves the device — no banner, no phone call. */
+  isUnlinkedPatient: boolean;
   loading: boolean;
   error: string | null;
   login: (email: string, password: string) => Promise<void>;
   signup: (email: string, password: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   enterPatientMode: () => void;
+  /** Return to the role screen WITHOUT signing out — see below. */
+  handOverDevice: () => void;
   logout: () => Promise<void>;
 }
 
@@ -35,26 +41,13 @@ function createLocalDemoToken(uid: string, email: string): string {
   return `${header}.${payload}.local-dev-signature`;
 }
 
-function parseJwtPayload(token: string): { uid?: string; user_id?: string; sub?: string; email?: string } | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
-    const payload = JSON.parse(atob(padded));
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
 function startLocalSession(
   email: string,
   setUser: React.Dispatch<React.SetStateAction<{ uid: string; email: string | null } | null>>,
   setToken: React.Dispatch<React.SetStateAction<string | null>>,
   setError: React.Dispatch<React.SetStateAction<string | null>>
 ) {
-  const uid = `local-${email.replace(/[^a-zA-Z0-9]/g, '').toLowerCase() || 'user'}`;
+  const uid = localUid(email, localStorage.getItem('yadira_user_id'));
   const localToken = createLocalDemoToken(uid, email);
   setUser({ uid, email });
   setToken(localToken);
@@ -89,7 +82,30 @@ function isFirebaseAuthConfigError(err: any): boolean {
 function activeSessionRole(): 'caregiver' | 'patient' | null {
   if (typeof window === 'undefined') return null;
   const role = sessionStorage.getItem('yadira_session_role');
-  return role === 'patient' || role === 'caregiver' ? role : null;
+  if (role === 'patient' || role === 'caregiver') return role;
+
+  // ...with one exception: a device under Care Lock.
+  //
+  // The rule above exists so a shared or public browser never auto-resumes
+  // somebody's session. A care-locked tablet is the exact opposite situation
+  // — it is a dedicated patient device, deliberately pinned to the companion
+  // by a caregiver who then handed it over. When it restarts overnight, the
+  // rule as written puts a login screen in front of a person with dementia
+  // and asks them to pick a role. They cannot be asked for a password, and
+  // they should not have to be: the account is still on the device, which is
+  // the only thing that was ever in question.
+  //
+  // Resuming as 'caregiver' restores exactly the pre-restart state — Care
+  // Lock pins the view to the companion and hides every caregiver control, so
+  // the role underneath is the one it already had.
+  try {
+    if (localStorage.getItem('yadira_care_lock') === '1' && localStorage.getItem('yadira_token')) {
+      sessionStorage.setItem('yadira_session_role', 'caregiver');
+      return 'caregiver';
+    }
+  } catch { /* storage blocked — fall through to the login screen */ }
+
+  return null;
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -283,6 +299,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     // sessions stopped auto-restoring on fresh visits, `user` is null on the
     // login screen even when a valid token sits in localStorage — previously
     // this function skipped setUser in that case and the tap did nothing.
+    //
+    // Note the two outcomes, because they are not the same product. With a
+    // token present the device keeps the caregiver's uid, so it is INSIDE the
+    // family's circle: the help button reaches them and their phone rings.
+    // Without one it starts a local session in a circle of its own, which is
+    // a demo — nothing it raises leaves the device. `isUnlinkedPatient` is
+    // how the rest of the app tells which of the two it is standing in.
     const existingToken = localStorage.getItem('yadira_token');
     const payload = existingToken ? parseJwtPayload(existingToken) : null;
     const uid = payload?.uid || payload?.user_id || payload?.sub;
@@ -291,10 +314,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(existingToken);
       setError(null);
     } else {
-      startLocalSession('patient@yadira.local', setUser, setToken, setError);
+      startLocalSession(UNLINKED_PATIENT_EMAIL, setUser, setToken, setError);
     }
     sessionStorage.setItem('yadira_session_role', 'patient');
     setSessionRole('patient');
+  };
+
+  /**
+   * Back to the role screen, still signed in.
+   *
+   * Until now the only way to reach that screen was to log out — which
+   * removes the account, and the account is the only thing putting a device
+   * in the family's circle. So the screen's own "Connected to your care
+   * circle" state was unreachable on purpose: you could only land on it by
+   * accident, by closing the tab and reopening. A caregiver following the
+   * obvious path instead destroyed the connection on the way to using it.
+   *
+   * This clears the session's ROLE, not the identity. localStorage keeps the
+   * token and uid; only the sessionStorage marker goes, which is exactly what
+   * a fresh visit does. The patient button then reads "Connected to your care
+   * circle" and means it.
+   */
+  const handOverDevice = () => {
+    sessionStorage.removeItem('yadira_session_role');
+    setSessionRole('caregiver');
+    setUser(null);
+    setToken(null);
+    setError(null);
   };
 
   const logout = async () => {
@@ -318,7 +364,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, sessionRole, loading, error, login, signup, loginWithGoogle, enterPatientMode, logout }}>
+    <AuthContext.Provider value={{ user, token, sessionRole, isUnlinkedPatient: isUnlinkedPatientCircle(user?.uid), loading, error, login, signup, loginWithGoogle, enterPatientMode, handOverDevice, logout }}>
       {children}
     </AuthContext.Provider>
   );

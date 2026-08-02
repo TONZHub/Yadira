@@ -98,6 +98,76 @@ under these rules their cloud sync silently stays off and they run on
 localStorage only. That's the correct trade: paying families are isolated
 and authenticated; the demo still works.
 
+### Setting up the patient's device
+
+This follows directly from "the circle id IS the uid", and it is the one
+step nothing in the app can do on the family's behalf:
+
+> **Sign in on the patient's device with the caregiver's account, then press
+> "hand over" in the header. Do not log out.**
+
+Hand over clears the session's *role* and nothing else: the sessionStorage
+marker goes, the token and uid stay. It returns to the role screen still
+signed in, so when the patient taps "I'm a Patient" they inherit the
+caregiver's uid and land inside the family's circle.
+
+Before it existed, the only route to that screen was Log out — which is why
+the obvious way to hand a device over was also the way that broke it.
+
+**Care Lock** (the padlock) is the extra step for a tablet that stays with the
+patient, not the mechanism. It pins the device to the patient view, hides the
+tab switcher and the logout button so no destructive control is reachable by a
+stray touch, and goes full screen. It also survives a restart, so the tablet
+comes back into the companion rather than into a login screen.
+
+**Logging out is what breaks the link**, and it does not look like it. Once
+the account is gone the patient button becomes "Try the companion", which mints
+a local session in a circle of its own — the help button raises an alert the caregiver
+never receives, the escalation number saved on the caregiver's device is not
+there, and the circle is on nobody's subscription — so the CALL-E call has
+neither a number to ring nor a Pro entitlement to ring it with. This is why
+the same help button "works in Preview Patient View and not on the patient's
+tablet".
+
+The app now says so at each of the three points where it can:
+
+| Where | What it says |
+| --- | --- |
+| Role screen, no account on the device | Sign in first, then hand over |
+| Caregiver's help-call card | The handover, and "do not log out first" |
+| The logout confirmation itself | Logging out disconnects this device |
+
+And since a promise nobody can keep is worse than silence, an unlinked
+patient session never tells the patient that someone has been told and is
+coming. See `src/lib/localSession.ts`.
+
+## Step 7 — Server-side token verification (built)
+
+Firestore rules protect the *database*, but the Express API in `src/server`
+has its own door. It now verifies Firebase ID tokens properly
+(`src/server/firebaseToken.ts`): RS256 signature checked against Google's
+published signing certificates, plus issuer, audience and expiry. Previously
+the payload was base64-decoded and trusted, so anyone could present
+`{"uid":"<any family>"}` and be that family — which meant free use of the
+AI routes on our bill and the ability to drive another family's alerts.
+
+No extra setup is needed: the project id defaults to the same `yadira-1c1dd`
+committed in `src/lib/firebase.ts`, and the certificates are public. Set
+`FIREBASE_PROJECT_ID` only when pointing the server at a different project.
+The server needs outbound access to `www.googleapis.com`.
+
+Three trust tiers, so a care product never goes dark on an aged token:
+
+| Tier | Meaning | Where it's accepted |
+|---|---|---|
+| `verified` | signature, issuer, audience, expiry all good | everywhere |
+| `stale` | genuinely signed by Google, expiry passed (≤30 days) | help button, lucidity alert, TTS, mode sync |
+| `local` | the unsigned local-demo token; uid must be `local-*` | everywhere, but only ever reaches a `local-*` circle |
+
+The circle a request touches is now derived from the verified identity, not
+from the `circle` field in the body — that field was previously enough to
+read another family's sync state or silently acknowledge their help alert.
+
 ## Next up (not yet built)
 
 - Stripe subscription gating per circle

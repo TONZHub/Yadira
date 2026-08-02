@@ -17,6 +17,16 @@ interface MediaUploadProps {
   isPremium?: boolean;
   /** Button label — defaults to "Media". */
   label?: string;
+  /**
+   * Show the server's actual reason when analysis fails.
+   *
+   * On by default nowhere: this component sits in the patient's chat as well
+   * as the caregiver's album, and "models/gemini-3.5-pro is not found for API
+   * version v1beta" put in front of someone with dementia is frightening
+   * noise about a thing they cannot act on. The caregiver, who is the only
+   * person who can fix a misconfigured model, gets the sentence instead.
+   */
+  showTechnicalErrors?: boolean;
 }
 
 // Downscale an already-loaded data URL to a small gallery thumbnail. Falls
@@ -47,7 +57,7 @@ function makeGalleryPhoto(dataUrl: string): Promise<string> {
   });
 }
 
-export const MediaUpload: React.FC<MediaUploadProps> = ({ onMediaAnalyzed, disabled = false, isPremium = true, label = 'Media' }) => {
+export const MediaUpload: React.FC<MediaUploadProps> = ({ onMediaAnalyzed, disabled = false, isPremium = true, label = 'Media', showTechnicalErrors = false }) => {
   const { error: toastError } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
@@ -158,12 +168,21 @@ export const MediaUpload: React.FC<MediaUploadProps> = ({ onMediaAnalyzed, disab
       onMediaAnalyzed(insight, photoDataUrl);
       clearPreview();
     } catch (err) {
-      const msg = `Analysis error: ${err instanceof Error ? err.message : 'Unknown error'}`;
-      setError(msg);
-      toastError('Media Analysis Failed', 'Could not analyze media. Please try again.', {
-        label: 'Retry',
-        onClick: () => analyzeMedia(base64Data),
-      });
+      // "Could not analyze media" is the same sentence whether the photo was
+      // corrupt, the key was missing, or the configured model does not exist —
+      // and only one of those is worth retrying. So the caregiver gets what
+      // the server actually said. The patient gets a calm sentence about a
+      // photo, because the technical one names something they cannot act on.
+      const reason = err instanceof Error ? err.message : 'Unknown error';
+      const shown = showTechnicalErrors
+        ? reason
+        : "That photo didn't come through just now. It's nothing you did — try again in a moment.";
+      setError(shown);
+      toastError(
+        showTechnicalErrors ? 'Photo analysis failed' : "Couldn't look at that photo",
+        shown,
+        { label: 'Retry', onClick: () => analyzeMedia(base64Data) }
+      );
     } finally {
       setIsLoading(false);
     }

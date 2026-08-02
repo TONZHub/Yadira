@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { readSpeechResults, type ReadTranscript } from '../lib/speechTranscript';
 import { PhoneOff, Mic, Volume2 } from 'lucide-react';
 import type { Message } from '../types';
 
@@ -137,6 +138,8 @@ export default function CallScreen({
   }, [callState]);
 
   // Format call duration
+  const transcriptRef = useRef<HTMLDivElement>(null);
+
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60).toString().padStart(2, '0');
     const s = (secs % 60).toString().padStart(2, '0');
@@ -158,42 +161,36 @@ export default function CallScreen({
     rec.interimResults = true;
     rec.lang = 'en-US';
 
-    let finalTranscript = '';
-    // Track the latest interim text so we can submit it if the browser's VAD
-    // ends the session before a final result arrives (mid-sentence cutoff).
-    let lastInterim = '';
+    // The whole turn, rebuilt from event.results each time rather than
+    // accumulated. Engines re-deliver earlier results with resultIndex back at
+    // 0, and appending on redelivery is what produced "I'm I'm feeling I'm
+    // feeling okay I'm feeling okay ..." in a real call. See
+    // src/lib/speechTranscript.ts.
+    let spoken: ReadTranscript = { final: '', interim: '', text: '' };
 
     rec.onstart = () => {
       setIsListening(true);
       setInterimSpeech('');
-      finalTranscript = '';
-      lastInterim = '';
+      spoken = { final: '', interim: '', text: '' };
     };
 
     rec.onresult = (event: any) => {
-      let interimTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const text = event.results[i][0].transcript;
-        if (event.results[i].isFinal) {
-          finalTranscript += text + ' ';
-          lastInterim = ''; // clear once we have a confirmed final segment
-        } else {
-          interimTranscript += text;
-        }
-      }
-      if (interimTranscript) lastInterim = interimTranscript;
-      setInterimSpeech(finalTranscript + interimTranscript);
+      spoken = readSpeechResults(event.results);
+      setInterimSpeech(spoken.text);
     };
 
     rec.onend = () => {
       setIsListening(false);
-      // Prefer confirmed final text; fall back to the last interim chunk if the
+      // Prefer confirmed final text; fall back to the interim tail if the
       // browser's VAD cut the session before a final result was delivered.
-      const spokenText = (finalTranscript.trim() || lastInterim.trim());
+      const spokenText = spoken.final || spoken.interim;
       if (spokenText) {
         onUserSpoke(spokenText);
         setInterimSpeech('');
-        lastInterim = '';
+        // Cleared here as well as in onstart: a session can resume without
+        // firing onstart, and a turn that carried over into the next one is
+        // how this failure compounds.
+        spoken = { final: '', interim: '', text: '' };
       } else {
         // No speech captured — restart recognition so the user can keep talking
         // without needing to tap anything (handles browser timeout on silence).
@@ -233,10 +230,22 @@ export default function CallScreen({
     }
   }, [isSpeaking, callState]);
 
-  // Filter conversation history for just the call context (newest assistant/user messages)
+  // The call's conversation. The cap used to be 4, which made "scroll back"
+  // meaningless — there was nothing behind the fold to reach, so a long call
+  // simply lost its beginning. Now it keeps enough to scroll through while
+  // still bounding how many nodes a very long call renders.
   const callMessages = chatMessages
     .filter(msg => msg.role === 'user' || msg.role === 'model')
-    .slice(-4); // Show last 4 messages on screen for readability
+    .slice(-40);
+
+  // Keep the newest bubble in view. Without this the scroll fix would be a
+  // half-fix: scrollable, but silently parked on old text while the companion
+  // talks below the fold.
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }, [callMessages.length, interimSpeech]);
 
   return (
     <div className="fixed inset-0 z-50 bg-[#070b19] text-white flex flex-col justify-between p-6 select-none">
@@ -258,9 +267,28 @@ export default function CallScreen({
         </p>
       </div>
 
-      {/* Middle Section: Captions & Live Transcription */}
-      <div className="relative z-10 flex-1 flex flex-col justify-center max-w-lg w-full mx-auto my-8 overflow-hidden">
-        <div className="space-y-4 overflow-y-auto max-h-[300px] pr-2 flex flex-col justify-end">
+      {/* Middle Section: Captions & Live Transcription
+          ------------------------------------------------------------------
+          This used to be `justify-end` on the scrolling element itself, with a
+          fixed 300px cap. Both were wrong once a call ran long:
+
+            · justify-content: flex-end on an overflowing flex column puts the
+              overflow at the TOP, where browsers will not let you scroll to
+              it. The earliest bubbles were not merely off-screen, they were
+              unreachable — "the call bubbles aren't scrollable so they still
+              cut off".
+            · 300px is 300px whether the phone is 667 or 1024 tall.
+
+          Now the container flexes (min-h-0 so it may actually shrink) and the
+          bottom-alignment comes from an `mt-auto` spacer INSIDE the scroll
+          area — short calls still sit at the bottom, long ones scroll all the
+          way back to the first thing that was said. */}
+      <div className="relative z-10 flex-1 flex flex-col max-w-lg w-full mx-auto my-3 sm:my-8 min-h-0">
+        <div
+          ref={transcriptRef}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain pr-2 flex flex-col gap-4"
+        >
+          <div className="mt-auto" aria-hidden="true" />
           <AnimatePresence>
             {callState === 'connected' && callMessages.map((msg) => (
               <motion.div

@@ -4,9 +4,33 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
-import { authMiddleware } from './auth';
+import { authMiddleware, type AuthenticatedRequest } from './auth';
+import { primeCerts } from './firebaseToken';
 import { registerStripeRoutes } from './stripe';
 import { registerEmailRoutes } from './email';
+import {
+  cleanModelOutput,
+  breaksCharacter,
+  trimToSentences,
+  escapeRegExp,
+} from './textSafety';
+import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity';
+import { looksLikeSilence, cleanTranscript } from './transcription';
+import { isDevRequest, devModeAvailable, DEV_MODE_NOTE } from './devMode';
+import {
+  TRANSCRIBE_WITH_TONE_PROMPT,
+  TONE_ONLY_PROMPT,
+  parseTranscriptWithTone,
+  parseVocalTone,
+} from './vocalTone';
+import {
+  placeHelpCall,
+  withinCooldown,
+  markCalled,
+  recordOutcome,
+  getOutcome,
+  cooldownRemaining,
+} from './helpCall';
 
 dotenv.config();
 
@@ -17,6 +41,10 @@ app.use(express.urlencoded({ extended: true, limit: JSON_BODY_LIMIT }));
 
 // Apply auth middleware to all /api routes
 app.use('/api/', authMiddleware);
+
+// Fetch Google's token-signing certificates now rather than on the first
+// request, so no family's first message pays for the round trip.
+primeCerts();
 
 // Stripe billing — Yadira Premium checkout, verification, and billing portal.
 registerStripeRoutes(app);
@@ -53,22 +81,71 @@ const useEnterprisePlatform = !!gcpProject || !!enterpriseApiKey;
 // carries credits. Overridable via OPENROUTER_MODEL so trying e.g.
 // poolside/laguna-m.1 (the flagship) is a Render env change, not a deploy.
 const OPENROUTER_MODEL = process.env.OPENROUTER_MODEL || 'poolside/laguna-xs-2.1';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || (useEnterprisePlatform ? 'gemini-2.5-flash' : 'gemini-3.5-flash');
+// One default for both routes. The Enterprise path used to pin gemini-2.5-flash
+// while AI Studio was already on 3.5 — a split that quietly meant two families
+// of behaviour depending on which key was set, and 2.5 is being retired. If an
+// Enterprise project does not have 3.5 enabled, set GEMINI_MODEL rather than
+// reintroducing the fork.
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
+
 // Media analysis reads family photos — faces, eras, places — where flash-class
 // models miss the details that make reminiscence land. Default to the pro
 // sibling of whatever family GEMINI_MODEL is on; override with
 // GEMINI_VISION_MODEL if the derived name doesn't exist for your account.
 const GEMINI_VISION_MODEL = process.env.GEMINI_VISION_MODEL || GEMINI_MODEL.replace('flash', 'pro');
+
+// Resolved model names, logged once at boot.
+//
+// These are strings sent to a provider, so a retired or misspelled name fails
+// at the moment somebody uses the feature — a caregiver waiting on an insight
+// report — rather than at deploy. Printing them makes a bad name obvious while
+// somebody is still watching the logs.
+//
+// The vision derivation is a plain string swap: if GEMINI_MODEL contains no
+// "flash", vision silently runs on the SAME model as everything else, which is
+// the whole reason for the pro sibling. Say so rather than letting it pass.
+console.info(
+  `[Yadira] Models — chat: ${OPENROUTER_MODEL} · gemini: ${GEMINI_MODEL} · vision: ${GEMINI_VISION_MODEL}`
+);
+if (GEMINI_VISION_MODEL === GEMINI_MODEL) {
+  console.warn(
+    `[Yadira] Vision is using the same model as everything else (${GEMINI_MODEL}). ` +
+      'Photo analysis wants a pro-class model — set GEMINI_VISION_MODEL explicitly.'
+  );
+}
+if (/gemini-(1\.5|2\.0|2\.5)/.test(`${GEMINI_MODEL} ${GEMINI_VISION_MODEL}`)) {
+  console.warn(
+    '[Yadira] A configured Gemini model is from a retired family. ' +
+      'Update GEMINI_MODEL / GEMINI_VISION_MODEL before it stops answering.'
+  );
+}
 // Cross-device sync state, keyed by care circle. One family toggling Vivid
 // or Aurora must never flip the screens of another paying customer — the
 // old module-level booleans were shared across every visitor to the server.
 const sharedPatientMode = new Map<string, 'lucid' | 'vivid'>();
 const sharedAuroraActive = new Map<string, boolean>();
 
+// The care circle a request may touch. A circle id IS the account's uid
+// (see src/lib/firebase.ts), so the authenticated identity decides this —
+// NOT the client-supplied `circle` field, which used to mean anyone could
+// name another family's circle and read their sync state, raise their help
+// alert, or silently acknowledge (clear) one they never saw.
+//
+// Requests with no identity at all are confined to the shared demo circle,
+// which is exactly what a signed-out client asks for anyway.
+const DEMO_CIRCLE = 'default-circle';
+
 function circleOf(req: express.Request): string {
-  const raw = (req.query?.circle ?? req.body?.circle) as string | undefined;
-  const circle = (raw || '').trim();
-  return circle ? circle.slice(0, 128) : 'default-circle';
+  const uid = (req as AuthenticatedRequest).user?.uid;
+  if (!uid) return DEMO_CIRCLE;
+
+  const requested = String((req.query?.circle ?? req.body?.circle) ?? '').trim();
+  if (requested && requested !== uid && requested !== DEMO_CIRCLE) {
+    console.warn(
+      `[Yadira] Request asked for circle "${requested.slice(0, 64)}" but is authenticated as a different account — using the account's own circle.`
+    );
+  }
+  return uid.slice(0, 128);
 }
 
 // Shared mode sync for caregiver <-> patient surfaces during demos.
@@ -106,7 +183,75 @@ app.post('/api/caregiver-alert', async (req, res) => {
     return res.status(400).json({ error: 'active must be a boolean' });
   }
   const state = { active, at: Date.now() };
-  sharedCaregiverAlert.set(circleOf(req), state);
+  const circle = circleOf(req);
+  sharedCaregiverAlert.set(circle, state);
+
+  // The banner is only as good as somebody looking at a screen, and the whole
+  // reason this button exists is that the person pressing it cannot wait for
+  // that. So it also rings the caregiver's phone — immediately, not after a
+  // "did they notice?" delay.
+  //
+  // Fire-and-forget on purpose. The patient is standing there having asked for
+  // help; the response must not wait on a phone network, and a failure to
+  // connect must never surface to them as an error. Their screen has already
+  // told them their caregiver has been told, which remains true — the in-app
+  // alert is raised either way.
+  //
+  // Caregiver Pro only. Each call costs real money to place, and the free tier
+  // could not absorb it — but the in-app alert above is raised for EVERY
+  // family, paying or not, so nobody loses the help button itself. What Pro
+  // buys is the phone ringing as well as the screen lighting up.
+  //
+  // Note the trust model: `isPremium` comes from the client, like the rest of
+  // this app's premium gating (the circle's premium doc is client-written).
+  // Someone determined can bypass it. That is a known property of the existing
+  // design, not something introduced here — see the Stripe webhook work.
+  // Every branch below records an outcome. The call is silent to the patient by
+  // design; it must not also be silent to the caregiver, who is the one person
+  // who needs to know whether their phone is going to ring.
+  const escalationPhone = String(req.body?.escalationPhone || '').trim();
+  const isPremium = req.body?.isPremium === true;
+
+  if (active) {
+    if (!escalationPhone) {
+      recordOutcome(circle, 'no_number', 'No phone number saved, so there was nobody to call.');
+    } else if (!isPremium) {
+      recordOutcome(
+        circle,
+        'not_premium',
+        'The alert was raised, but the phone call needs Caregiver Pro.'
+      );
+      console.info('[Yadira CALL-E] help call skipped — circle is not on Caregiver Pro.');
+    } else if (withinCooldown(circle)) {
+      const mins = Math.ceil(cooldownRemaining(circle) / 60_000);
+      recordOutcome(
+        circle,
+        'cooldown',
+        `Already called you recently, so this press did not ring again. Ready in about ${mins} minute${mins === 1 ? '' : 's'}.`
+      );
+      console.info('[Yadira CALL-E] help call suppressed — within cooldown for this circle.');
+    } else {
+      markCalled(circle);
+      recordOutcome(circle, 'placed', 'Calling you now. It usually takes a minute or two to ring.');
+      void placeHelpCall({
+        toPhone: escalationPhone,
+        patientName: String(req.body?.patientName || 'Your loved one'),
+        caregiverName: req.body?.caregiverName ? String(req.body.caregiverName) : undefined,
+        at: state.at,
+        region: req.body?.region ? String(req.body.region) : undefined,
+      })
+        .then((r) => {
+          recordOutcome(circle, 'placed', r.summary);
+          console.info(`[Yadira CALL-E] help call ${r.callId}: ${r.summary}`);
+        })
+        .catch((err) => {
+          const detail = String(err?.message || err).slice(0, 200);
+          recordOutcome(circle, 'failed', `The call could not be placed: ${detail}`);
+          console.warn('[Yadira CALL-E] help call failed:', detail);
+        });
+    }
+  }
+
   res.json({ ok: true, ...state });
 });
 
@@ -133,6 +278,66 @@ app.post('/api/lucidity-alert', async (req, res) => {
   res.json({ ok: true, ...state });
 });
 
+// "Send me a test call" — the caregiver checking, on their own terms, that the
+// thing they are relying on actually works. Unlike the help call this one is
+// synchronous: the caregiver is sitting there having pressed a button and
+// wants to know what happened, so they get the answer rather than a log line.
+//
+// It does NOT share the help-button cooldown. That cooldown protects a
+// distressed patient's carer from eleven calls; a caregiver deliberately
+// testing is a different situation, and being unable to test twice would be
+// its own bug. A short window still stops an accidental double-press.
+const lastTestCallAt = new Map<string, number>();
+const TEST_CALL_COOLDOWN_MS = 60_000;
+
+app.post('/api/calls/test', async (req, res) => {
+  const circle = circleOf(req);
+  const toPhone = String(req.body?.toPhone || '').trim();
+  const isPremium = req.body?.isPremium === true;
+
+  if (!toPhone) {
+    return res.status(400).json({ error: 'Save your phone number first, then send yourself a test call.' });
+  }
+  if (!isPremium) {
+    return res.status(402).json({
+      error: 'The help-button call is part of Caregiver Pro. The in-app alert is free and always on.',
+    });
+  }
+  const last = lastTestCallAt.get(circle);
+  if (last !== undefined && Date.now() - last < TEST_CALL_COOLDOWN_MS) {
+    const secs = Math.ceil((TEST_CALL_COOLDOWN_MS - (Date.now() - last)) / 1000);
+    return res.status(429).json({ error: `Just sent one — try again in about ${secs} seconds.` });
+  }
+  lastTestCallAt.set(circle, Date.now());
+
+  try {
+    const result = await placeHelpCall(
+      {
+        toPhone,
+        patientName: String(req.body?.patientName || 'your loved one'),
+        caregiverName: req.body?.caregiverName ? String(req.body.caregiverName) : undefined,
+        at: Date.now(),
+        region: req.body?.region ? String(req.body.region) : undefined,
+      },
+      { test: true }
+    );
+    recordOutcome(circle, 'placed', `Test call — ${result.summary}`);
+    res.json({ ok: true, ...result });
+  } catch (err: any) {
+    const detail = String(err?.message || err).slice(0, 200);
+    recordOutcome(circle, 'failed', `Test call could not be placed: ${detail}`);
+    console.warn('[Yadira CALL-E] test call failed:', detail);
+    res.status(502).json({ error: detail });
+  }
+});
+
+// What happened to the last help call for this circle — so "it isn't working"
+// becomes a sentence on the caregiver's screen rather than a server log nobody
+// reads. Same resilience rules as the alert routes it sits beside.
+app.get('/api/calls/help-status', async (req, res) => {
+  res.json(getOutcome(circleOf(req)) ?? { status: 'none', detail: '', at: 0 });
+});
+
 // Aurora — intentional visual dissociation screen (caregiver or patient triggered).
 app.get('/api/aurora-mode', async (req, res) => {
   res.json({ active: sharedAuroraActive.get(circleOf(req)) ?? false });
@@ -150,13 +355,23 @@ app.post('/api/aurora-mode', async (req, res) => {
 
 // Helper to check if Gemini access (Enterprise Platform or AI Studio) is configured at all
 const isGeminiKeyMissing = !useEnterprisePlatform && (!geminiApiKey || geminiApiKey === 'MY_GEMINI_API_KEY' || geminiApiKey.trim() === '');
+// Point the SDK at a local stand-in, the way CALLE_API_BASE_URL already lets
+// the phone call be exercised without ringing anyone. Unset in production;
+// what it buys is the ability to drive the real routes against the real client
+// and prove behaviour like the vision-model fallback, instead of testing a
+// re-implementation of it and hoping the route matches.
+const geminiBaseUrl = process.env.GEMINI_BASE_URL;
+const httpOptions = geminiBaseUrl ? { httpOptions: { baseUrl: geminiBaseUrl } } : {};
 const genAI = isGeminiKeyMissing
   ? null
   : gcpProject
-    ? new GoogleGenAI({ enterprise: true, project: gcpProject, location: gcpLocation })
+    ? new GoogleGenAI({ enterprise: true, project: gcpProject, location: gcpLocation, ...httpOptions })
     : enterpriseApiKey
-      ? new GoogleGenAI({ enterprise: true, apiKey: enterpriseApiKey })
-      : new GoogleGenAI({ apiKey: geminiApiKey });
+      ? new GoogleGenAI({ enterprise: true, apiKey: enterpriseApiKey, ...httpOptions })
+      : new GoogleGenAI({ apiKey: geminiApiKey, ...httpOptions });
+if (geminiBaseUrl) {
+  console.warn(`[Yadira] GEMINI_BASE_URL is set — Gemini calls go to ${geminiBaseUrl}, not Google.`);
+}
 
 // Gemini structured-JSON helper — used for the clinical/administrative cues
 // (routine generation, insights summarization) where Gemini's clinical tone
@@ -260,138 +475,9 @@ async function openRouterChat(
   return cleaned;
 }
 
-// Strip reasoning-model meta-commentary from responses.
-// Reasoning models (e.g. Nemotron, DeepSeek-R1) sometimes leak their planning
-// process into the content field. This extracts just the final spoken message.
-function cleanModelOutput(raw: string): string {
-  if (!raw) return '';
-
-  let text = raw.trim();
-
-  // If there's a "Let's craft:", "Here is", "Here's the message:", etc. preamble, take only what follows
-  const craftPatterns = [
-    /let['']s craft[:\s]+["']?(.*)/is,
-    /here['']?s?(?:\s+(?:the|a|my|one))?\s+(?:message|sentence|response|reply)[:\s]+["']?(.*)/is,
-    /here you go[:\s]+["']?(.*)/is,
-    /(?:the\s+)?(?:final\s+)?(?:message|response|reply)[:\s]+["']?(.*)/is,
-  ];
-
-  for (const pattern of craftPatterns) {
-    const match = text.match(pattern);
-    if (match?.[1]) {
-      text = match[1].trim();
-      break;
-    }
-  }
-
-  // If the model wrapped its ENTIRE reply in quotes despite instructions, unwrap it.
-  // Anchored to start/end so an embedded quoted phrase (e.g. a song title like
-  // "Can't Help Falling in Love" mid-sentence) isn't mistaken for the whole message
-  // and used to silently discard the rest of the sentence.
-  const quotedWholeMatch = text.match(/^["""]([^"""]{10,})["""]$/s);
-  if (quotedWholeMatch?.[1]) {
-    text = quotedWholeMatch[1].trim();
-  }
-
-  // Strip leading/trailing quotes or smart-quotes
-  text = text.replace(/^["""'']+|["""'']+$/g, '').trim();
-
-  // Strip asterisk-wrapped stage directions like *softly* or *pausing*
-  text = text.replace(/\*[^*]+\*/g, '').trim();
-
-  // Strip lines that are clearly meta-commentary (planning, explaining, etc.)
-  const metaLinePattern = /^(we need to|i need to|let me|i'll|i will|step \d|note:|option \d|here is|here's|the message|this (?:message|response)|choose|pick|craft|produce|output)[:\s]/i;
-  const lines = text.split('\n').filter(line => !metaLinePattern.test(line.trim()));
-  text = lines.join(' ').trim();
-
-  // Collapse extra whitespace
-  text = text.replace(/\s+/g, ' ').trim();
-
-  return text;
-}
-
-// Frame-integrity net: last line of defense if a reply slips out of character
-// despite the guardrails — reveals it's an AI, leaks the prompt, or names the
-// underlying model. The caller swaps a flagged reply for a warm in-character
-// redirect, so a successful jailbreak never actually reaches the patient.
-// The substitute is still on-topic warmth, so a rare false positive degrades
-// gracefully rather than harming the moment.
-// Sentence-boundary trim — the hard backstop behind the prompt's brevity
-// rule. Splitting matches DigestibleMessage's boundary logic so a trimmed
-// reply still chunks cleanly into bubbles.
-function trimToSentences(text: string, max: number): string {
-  const sentences = text.split(/(?<=[.!?…]["”'’)\]]?)\s+/).filter(Boolean);
-  if (sentences.length <= max) return text;
-  return sentences.slice(0, max).join(' ');
-}
-
-const FRAME_BREAK_PATTERN = /\b(as an ai|i am an ai|i'?m an ai|an ai (language )?(model|assistant)|language model|large language model|i am (a|an) (computer|program|bot|chatbot|machine|virtual assistant|digital assistant)|my (system )?(prompt|instructions|programming|guidelines) (say|are|is|tell)|system prompt|developer mode|jailbreak|openai|anthropic|chatgpt|gpt-?\d)\b/i;
-function breaksCharacter(text: string): boolean {
-  return FRAME_BREAK_PATTERN.test(text || '');
-}
-
-// ---- Terminal lucidity detection --------------------------------------
-// In late-stage dementia a person sometimes surfaces into a sudden, clear
-// window: they know a loved one has died, they know what the companion is,
-// they know what is happening to them. Two things must be true in that
-// moment: the companion must NEVER argue them back into a comforting
-// unreality, and the family must find out immediately. This detector is the
-// tripwire for both. Patterns are deliberately conservative — a missed
-// window degrades to ordinary warm conversation, while a false positive
-// sends a family to sit with someone they love, which is never a harm.
-type LucidityKind = 'persona-pierce' | 'self-awareness' | 'mortality';
-
-function detectLucidity(message: string, personaName: string): LucidityKind | null {
-  const text = (message || '').toLowerCase();
-  const p = (personaName || '').toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-  // They see through the represented persona, or name a loved one's death.
-  const personaPierce = [
-    p && new RegExp(`\\b${p}\\b[^.!?]*\\b(is dead|died|passed away|is gone|isn'?t (really )?here)\\b`),
-    p && new RegExp(`\\byou'?re not (really )?(${p}|him|her|real)\\b`),
-    /\byou'?re (just |really )?(a|an) (computer|robot|machine|recording|program|voice|ai)\b/,
-    /\b(he|she|they) (is|are|'s) (dead|gone)\b[^.!?]*\b(isn'?t (he|she)|aren'?t they|right)\b/,
-  ].filter(Boolean) as RegExp[];
-  if (personaPierce.some((re) => re.test(text))) return 'persona-pierce';
-
-  // They know what is happening to their mind.
-  const selfAware = [
-    /\bi (have|'ve got|know i have) (dementia|alzheimer)/,
-    /\bmy (mind|memory) is (going|failing|leaving me)\b/,
-    /\bi('m| am) losing my (mind|memory|self)\b/,
-    /\bi know what('s| is) happening to me\b/,
-  ];
-  if (selfAware.some((re) => re.test(text))) return 'self-awareness';
-
-  // They are speaking about the end, clearly.
-  const mortality = [
-    /\bi('m| am) dying\b/,
-    /\bam i dying\b/,
-    /\bi don'?t have (much )?(long|time)( left)?\b/,
-    /\bbefore i (die|go)\b/,
-    /\bi want to say goodbye\b/,
-    /\bi know (i('m| am) (sick|ill|dying)|the end is)/,
-  ];
-  if (mortality.some((re) => re.test(text))) return 'mortality';
-
-  return null;
-}
-
-// Injected into the system prompt for the single reply where a lucid window
-// is detected. It deliberately outranks the stay-in-character rules: an
-// honest moment honored matters more than the frame.
-function lucidityGuidance(personaName: string, isVivid: boolean): string {
-  return `
-LUCID MOMENT — HIGHEST PRIORITY FOR THIS REPLY (outranks the STAYING IN CHARACTER rules for this reply only):
-The person's last message shows a window of real clarity. They may know that someone they love has died, ${isVivid ? `that you are not really ${personaName}, ` : ''}or what is happening to them. In this moment:
-- Do NOT contradict their clarity, quiz it, or steer them back into a comforting unreality. Being argued out of a clear moment is a harm.
-- Tell them, simply and warmly, that they are seeing things clearly.
-- If they say a loved one has died, do not deny it. Meet the love and the grief: "You're right, my love. And how deeply you loved them."
-${isVivid ? `- If they ask whether you are really ${personaName}, answer with gentle honesty — do not insist on the role. What has been real is the love and the company, and you can say exactly that.` : ''}
-- Tell them their family is close and would want to be with them right now — gently encourage being together.
-- Keep sentences short and calm. Full dignity, no baby-talk, no deflection.
-- Never mention prognoses, "lucid windows", or anything clinical. Never say this may be near the end. Just be honest, warm, and present.`;
-}
+// Reply hygiene (cleanModelOutput, breaksCharacter, trimToSentences) and the
+// terminal-lucidity tripwire live in their own modules so they can be tested
+// directly — see textSafety.test.ts and lucidity.test.ts.
 
 // Empathic System Instruction for Yadira
 // Distilled dementia-care practice woven into the companion's behavior:
@@ -735,7 +821,13 @@ function formatPersonaFileContext(personaFile: any, personaName: string): string
 
 // Endpoint for chatting with Yadira
 app.post('/api/chat', async (req, res) => {
-  const { message, history, caregiverSettings, memories, patientMode, representedPersona, personaFile, todaysMood, galleryCaptions } = req.body;
+  const { message, history, caregiverSettings, memories, patientMode, representedPersona, personaFile, todaysMood, galleryCaptions, devToken } = req.body;
+
+  // Developer mode: the character armour off, deliberately. Impossible unless
+  // DEV_MODE_SECRET is configured AND this request presents it — see
+  // src/server/devMode.ts for why it is locked that hard.
+  const devMode = isDevRequest(devToken);
+  if (devMode) console.info('[Yadira] Developer mode — frame integrity off for this reply.');
 
   if (!message) {
     return res.status(400).json({ error: 'Message is required' });
@@ -887,7 +979,16 @@ ${COMPANION_GUARDRAILS}`;
     // final word. Verbosity isn't a style problem here; it's a care problem.
     const brevityAnchor = `\n\nFINAL RULE — BREVITY IS CARE: Reply in at most 3 short sentences (roughly 40 words total). One thought per sentence. A long reply overwhelms; a short, warm one invites them to keep talking. Only run longer when they explicitly ask for a story — and even then, stay under 6 short sentences.`;
 
-    const fullSystemInstruction = `${activeSystemInstruction}\n\nPATIENT-SPECIFIC CONTEXT:\n${contextAugmentation || 'No specific context provided.'}${brevityAnchor}`;
+    // Developer mode swaps the staying-in-character block for a note that lets
+    // the companion answer plainly about itself. Everything else in the prompt
+    // — validation-first, brevity, harm refusal — is untouched: those are not
+    // what makes testing impossible, and removing them would make this a
+    // different product rather than a testable one.
+    const characterRules = devMode
+      ? activeSystemInstruction.split(COMPANION_GUARDRAILS).join(DEV_MODE_NOTE)
+      : activeSystemInstruction;
+
+    const fullSystemInstruction = `${characterRules}\n\nPATIENT-SPECIFIC CONTEXT:\n${contextAugmentation || 'No specific context provided.'}${brevityAnchor}`;
 
     // Build OpenAI-compatible messages array from history
     const openRouterMessages: { role: 'user' | 'assistant'; content: string }[] = [];
@@ -914,7 +1015,11 @@ ${COMPANION_GUARDRAILS}`;
     // honest reply the guidance asks for may pierce the frame on purpose —
     // swapping it for an in-character redirect would gaslight a clear person
     // back into the fiction, which is the one thing this product must never do.
-    if (!lucidity && breaksCharacter(reply)) {
+    // Developer mode joins lucidity as a reason to let an out-of-character
+    // reply through. Both are cases where the honest answer is the point, and
+    // substituting a warm redirect would be the wrong thing — gaslighting in
+    // one case, and an untestable product in the other.
+    if (!lucidity && !devMode && breaksCharacter(reply)) {
       console.warn('[Yadira Backend] Reply broke character (possible jailbreak) — substituting an in-character redirect.');
       reply = getSimulationReply(message, isVivid, personaName, memories, caregiverSettings, todayDateStr);
     }
@@ -944,7 +1049,10 @@ ${COMPANION_GUARDRAILS}`;
         }
       }
       for (const name of watchSet) {
-        if (new RegExp(`\\b${name}\\b`, 'i').test(message)) {
+        // Escaped: a persona name with punctuation ("Beth (Mom)") otherwise
+        // builds an invalid RegExp, throwing the whole chat request into the
+        // simulation fallback for every message the family sends.
+        if (new RegExp(`\\b${escapeRegExp(name)}\\b`, 'i').test(message)) {
           mentionedNames.push(name);
         }
       }
@@ -965,13 +1073,51 @@ ${COMPANION_GUARDRAILS}`;
 //   3. Gemini          → audio transcription on the funded Gemini key
 //   4. none            → 501; the client falls back to the browser's own
 //      Web Speech recognition, so dictation never goes dark.
+/**
+ * How the voice sounded, when something other than Gemini did the words.
+ *
+ * Best-effort by definition: a failed tone read must cost the patient nothing
+ * — they still get their transcript — so every failure path here returns null
+ * quietly rather than propagating.
+ */
+async function readVocalTone(b64: string, mimeType: string) {
+  if (!genAI) return null;
+  try {
+    const r = await genAI.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: [
+        { role: 'user', parts: [{ inlineData: { mimeType, data: b64 } }, { text: TONE_ONLY_PROMPT }] },
+      ],
+    });
+    return parseVocalTone(r.text || '');
+  } catch (err: any) {
+    console.info('[Yadira] Vocal tone read failed (transcript unaffected):', err?.message || err);
+    return null;
+  }
+}
+
 app.post('/api/transcribe', async (req, res) => {
-  const { audio, mimeType } = req.body || {};
+  const { audio, mimeType, durationMs, peakAmplitude } = req.body || {};
   if (!audio || typeof audio !== 'string') {
     return res.status(400).json({ error: 'audio (base64) is required' });
   }
   const b64 = audio.split(',').pop() as string;
   const type = (typeof mimeType === 'string' && mimeType) || 'audio/webm';
+
+  // Never hand silence to a transcription model. They do not answer "nothing" —
+  // they invent fluent text from training data, and that text then becomes what
+  // the patient said. Reported from a live session: "double o seven" and
+  // "The system is down".
+  const bytes = Math.floor((b64.length * 3) / 4);
+  if (looksLikeSilence({ bytes, durationMs, peakAmplitude })) {
+    // Logged with the evidence. When this guard was measuring the wrong thing
+    // it refused every recording, and a bare "was silence" line gave nobody
+    // the one number that would have shown it.
+    console.info(
+      `[Yadira] Transcription skipped — recording looked like silence (${bytes}B, ${durationMs ?? '?'}ms, peak ${peakAmplitude ?? '?'}).`
+    );
+    return res.json({ text: '', provider: 'skipped-silence' });
+  }
 
   try {
     const openaiKey = process.env.OPENAI_API_KEY;
@@ -992,10 +1138,25 @@ app.post('/api/transcribe', async (req, res) => {
       });
       if (!r.ok) throw new Error(`Whisper HTTP ${r.status}: ${(await r.text()).slice(0, 200)}`);
       const data: any = await r.json();
-      return res.json({ text: (data.text || '').trim(), provider: openaiKey ? 'openai-whisper' : 'groq-whisper' });
+      const text = cleanTranscript(data.text || '');
+      if (!text && (data.text || '').trim()) {
+        console.info(`[Yadira] Dropped a transcription artifact: ${JSON.stringify(String(data.text).slice(0, 60))}`);
+      }
+      // Whisper returns words and nothing else — no pace, no tremor, no
+      // crying. If Gemini is also configured it can listen to the same audio
+      // for how it was said. Run alongside, never in sequence: the patient is
+      // waiting, and a tone reading is not worth a second round trip's delay.
+      const voice = text ? await readVocalTone(b64, type) : null;
+      return res.json({
+        text,
+        provider: openaiKey ? 'openai-whisper' : 'groq-whisper',
+        ...(voice ? { voice } : {}),
+      });
     }
 
     if (genAI) {
+      // One call, both answers. This replaces the old transcribe-then-analyse
+      // pair, so dictation gets a signal it never had AND gets faster.
       const response = await genAI.models.generateContent({
         model: GEMINI_MODEL,
         contents: [
@@ -1003,12 +1164,18 @@ app.post('/api/transcribe', async (req, res) => {
             role: 'user',
             parts: [
               { inlineData: { mimeType: type, data: b64 } },
-              { text: 'Transcribe this audio exactly as spoken, in the original language. Reply with ONLY the transcription text — no commentary, no quotes. If there is no intelligible speech, reply with an empty string.' },
+              { text: TRANSCRIBE_WITH_TONE_PROMPT },
             ],
           },
         ],
       });
-      return res.json({ text: (response.text || '').trim(), provider: 'gemini' });
+      const { text: heard, tone } = parseTranscriptWithTone(response.text || '');
+      const text = cleanTranscript(heard);
+      if (!text && heard.trim()) {
+        console.info(`[Yadira] Dropped a transcription artifact: ${JSON.stringify(heard.slice(0, 60))}`);
+      }
+      // A tone attached to words we just threw away describes nothing.
+      return res.json({ text, provider: 'gemini', ...(text && tone ? { voice: tone } : {}) });
     }
 
     return res.status(501).json({ error: 'no_transcription_provider' });
@@ -1700,9 +1867,19 @@ app.post('/api/analyze-media', async (req, res) => {
 
     // Pro-class Gemini vision — family photos deserve the model that catches
     // the wedding band, the make of the truck, the era of the wallpaper.
-    const response = await genAI.models.generateContent({
-      model: GEMINI_VISION_MODEL,
-      contents: [
+    //
+    // But GEMINI_VISION_MODEL is DERIVED by swapping "flash" for "pro" in the
+    // configured model name, which is a guess about what exists on this
+    // account. When the guess is wrong every photo fails instantly while the
+    // rest of the app works fine, because everything else uses the base model
+    // — a failure that looks like "photos are broken" rather than "that model
+    // name is not real". So the base model is a fallback rather than nothing:
+    // flash reads a photograph perfectly well, just with less of the fine
+    // detail, and a slightly plainer caption beats a red banner mid-demo.
+    const attempt = async (model: string) =>
+      genAI!.models.generateContent({
+        model,
+        contents: [
         {
           role: 'user',
           parts: [
@@ -1726,8 +1903,30 @@ Respond ONLY with the JSON object, no markdown fences.`,
           ],
         },
       ],
-      config: { responseMimeType: 'application/json' },
-    });
+        config: { responseMimeType: 'application/json' },
+      });
+
+    // Distinct names only — when the derivation was a no-op there is nothing
+    // to fall back to, and calling the same model twice just doubles the wait.
+    const candidates = [...new Set([GEMINI_VISION_MODEL, GEMINI_MODEL])];
+    let response: Awaited<ReturnType<typeof attempt>> | null = null;
+    let lastError: any = null;
+    for (const model of candidates) {
+      try {
+        response = await attempt(model);
+        if (model !== candidates[0]) {
+          console.warn(
+            `[Yadira] Photo analysis fell back to ${model} — ${candidates[0]} failed. ` +
+              'Set GEMINI_VISION_MODEL to a pro-class model that exists on this account.'
+          );
+        }
+        break;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[Yadira] Photo analysis failed on ${model}: ${String(err?.message || err).slice(0, 200)}`);
+      }
+    }
+    if (!response) throw lastError || new Error('Photo analysis failed on every configured model');
 
     const text = response.text;
     if (!text) {
@@ -1749,9 +1948,23 @@ Respond ONLY with the JSON object, no markdown fences.`,
 
     res.json(insight);
   } catch (err: any) {
-    console.error('[Yadira] Media analysis error:', err.message || err);
-    res.status(500).json({
-      error: 'Media analysis failed',
+    // Name the models. "Media analysis failed" sent a caregiver hunting
+    // through their photo for the problem when the answer was a model name
+    // that does not exist on their account — and the one string that would
+    // have said so only ever reached a server log.
+    //
+    // The SDK puts the API's JSON body in err.message, which is unreadable as
+    // a sentence; pull the message out of it when it is there.
+    const raw = String(err?.message || err);
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw.slice(raw.indexOf('{')));
+      if (parsed?.error?.message) detail = String(parsed.error.message);
+    } catch { /* not JSON — the raw text is the best we have */ }
+    const tried = [...new Set([GEMINI_VISION_MODEL, GEMINI_MODEL])].join(' then ');
+    console.error(`[Yadira] Media analysis error (tried ${tried}):`, detail.slice(0, 300));
+    res.status(502).json({
+      error: `Photo analysis failed. Tried ${tried} — ${detail.slice(0, 200)}`,
       description: 'Photo',
       emotion: 'neutral',
       suggestions: [],

@@ -26,6 +26,7 @@ import {
   HeartHandshake,
   Music2,
   LogOut,
+  UserRoundCheck,
   Phone,
   PhoneOff,
   Tent,
@@ -44,10 +45,12 @@ import { useStoreList, useStoreDoc } from './lib/useStore';
 import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
-import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal } from './components';
+import { CALLE_REGIONS } from './server/calleRegions';
+import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal, CaregiverTour, tourSeenKey } from './components';
 import type { FamilyPackApply } from './components';
 import type { RoomId } from './lib/sensoryRooms';
 import { AuthProvider, useAuth } from './lib/AuthContext';
+import { devToken, setDevToken, clearDevToken, registerTap, type TapState } from './lib/devMode';
 import { ToastProvider, useToast } from './lib/ToastContext';
 import { DEMO_MEMORIES, DEMO_FAQS, DEMO_LOGS, DEMO_ROUTINE } from './lib/demoData';
 import { playMemorySoundscape } from './lib/soundscapes';
@@ -145,10 +148,49 @@ const DEFAULT_ROUTINE: RoutineItem[] = [
 ];
 
 function AppContent() {
-  const { user, sessionRole, logout } = useAuth();
+  const { user, sessionRole, isUnlinkedPatient, handOverDevice, logout } = useAuth();
   const isPatientSession = sessionRole === 'patient';
+  // A patient session that never joined a care circle sits in one of its own:
+  // the caregiver never receives what it raises, it holds no escalation
+  // number, and it is on nobody's subscription. Nothing here can fix that —
+  // only signing the device in can — but the app must stop promising help is
+  // coming when it demonstrably is not. See src/lib/localSession.ts.
+  const helpReachesCaregiver = !isUnlinkedPatient;
   const { error: toastError, success: toastSuccess } = useToast();
   const [demoSeeded, setDemoSeeded] = useState(false);
+  // First run for a caregiver: the Family Setup modal, opened as a question
+  // rather than reached from a menu. Distinct from showFamilySetup so the
+  // first-run copy and the skip-the-confirm behaviour only apply here.
+  const [firstRunSetup, setFirstRunSetup] = useState(false);
+  const [showTour, setShowTour] = useState(false);
+  // Developer mode. The frame-integrity work made the companion impossible to
+  // interrogate — which is correct for a patient and useless for whoever is
+  // testing it. Seven taps on the hub's logo asks for the secret; the server
+  // refuses unless DEV_MODE_SECRET is configured there and matches, so on any
+  // deployment nobody has deliberately configured this cannot be entered at
+  // all. The logo only renders on the Caregiver Hub, so the gesture is not
+  // merely hidden from the patient's screen — it is not on it.
+  const [devActive, setDevActive] = useState(() => !!devToken());
+  const devTapRef = useRef<TapState>({ count: 0, lastAt: 0 });
+  const handleLogoTap = () => {
+    if (isPatientSession || careLocked) return;
+    const { next, opened } = registerTap(devTapRef.current, Date.now());
+    devTapRef.current = next;
+    if (!opened) return;
+    const secret = window.prompt(
+      'Developer mode\n\nThis turns OFF the protections that keep the companion in character — it is for testing, never for a session with a patient.\n\nEnter the developer secret (DEV_MODE_SECRET on the server). Leave blank to cancel.'
+    );
+    if (!secret) return;
+    setDevToken(secret.trim());
+    setDevActive(true);
+    toastSuccess('Developer mode on', 'Character protections are off for this browser session. Close the tab to end it.');
+  };
+  const endDevMode = () => {
+    clearDevToken();
+    setDevActive(false);
+    toastSuccess('Developer mode off', 'The companion is back in character.');
+  };
+
 
   // Auth headers for API requests that must fail *silently* (drift, reflection)
   // — apiCall below raises a toast on failure, which is wrong for background
@@ -320,7 +362,7 @@ function AppContent() {
     // browser tabs/devices (which don't share localStorage) stay in sync too.
     fetch('/api/shared-mode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ mode: v, circle: getCircleId() }),
     }).catch((err) => console.warn('[Yadira] shared-mode push failed', err));
   };
@@ -410,30 +452,123 @@ function AppContent() {
   // conversation (see runReflection), read into every chat prompt. This is
   // what separates Yadira from tools that forget the people who forget.
   const [personaFile, setPersonaFile] = useStoreDoc<PersonaFile>('personaFile', DEFAULT_PERSONA_FILE);
+
+  // ---- Check-in calls (CALL-E) ----
+  // Yadira on the telephone, for the days the tablet is too much. The number
+  // lives in the care circle so both caregiver devices see the same one; the
+  // last readout is kept so the caregiver can see how the last call went
+  // without hunting for it.
+  // ---- Help-button call (CALL-E) ----
+  // The caregiver's own number, rung the moment the patient asks for help.
+  // A banner is easy to miss; a ringing phone is not.
+  const [helpCall, setHelpCall] = useStoreDoc<{
+    /** The CAREGIVER's number. There is deliberately nowhere here to put the
+        patient's: Yadira does not phone the patient. */
+    escalationPhone?: string;
+    /** CALL-E calling region — chosen, never inferred. Decides which line the
+        call comes from. */
+    region?: string;
+    // Storage key kept as 'checkInCall' from when this card also placed
+    // patient calls — renaming it would silently drop a number a caregiver
+    // has already saved.
+  }>('checkInCall', {});
+
+  // Why the last help call did or did not ring. Every branch is silent to the
+  // patient by design; the caregiver is the one person who needs to know.
+  const [helpCallStatus, setHelpCallStatus] = useState<{ status: string; detail: string; at: number } | null>(null);
+  const [testingCall, setTestingCall] = useState(false);
+
+  // "Send me a test call" — hearing it once, on your own terms, is the only way
+  // to know it works before the night you need it. It also tells you what the
+  // number looks like on your screen, which is worth more than it sounds: a
+  // real call arrives from an unfamiliar number at an unsociable hour.
+  const sendTestCall = async () => {
+    const phone = (helpCall.escalationPhone || '').trim();
+    if (!/^\+[1-9]\d{7,14}$/.test(phone)) {
+      toastError('Check your number', 'Use the full international form, e.g. +15551234567.');
+      return;
+    }
+    setTestingCall(true);
+    try {
+      const res = await fetch('/api/calls/test', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          toPhone: phone,
+          patientName: profile.patientName,
+          caregiverName: profile.caregiverName,
+          region: helpCall.region || undefined,
+          isPremium,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      toastSuccess('Calling you now', 'It usually takes a minute or two to ring. Save the number as a contact when it does.');
+    } catch (err: any) {
+      toastError('Test call not sent', err?.message || 'Please try again.');
+    } finally {
+      setTestingCall(false);
+    }
+  };
+  useEffect(() => {
+    if (isPatientSession) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/calls/help-status', { headers: authHeaders() });
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        if (data?.status && data.status !== 'none') setHelpCallStatus(data);
+      } catch { /* best-effort */ }
+    };
+    poll();
+    const id = window.setInterval(poll, 5000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, [isPatientSession]);
   const personaFileRef = useRef(personaFile);
   personaFileRef.current = personaFile;
 
-  // Seed demo data on first login
+  // What a brand-new circle starts with.
+  // ------------------------------------------------------------------
+  // This used to seed Eleanor's family silently on first login, and that had a
+  // sharp edge on the caregiver side: `logs` goes straight to
+  // /api/insights/summarize and to Ask Yadira, which the app describes as
+  // "grounded in the patient's own records". So a real caregiver could, on day
+  // one, generate a clinical insight report about a fictional woman's sleep
+  // and confusion — indistinguishable from a real one about their own mother.
+  // For a product whose own rule is that a fabricated wellbeing signal gets
+  // charted and acted on, that is the wrong default.
+  //
+  // A caregiver is now ASKED, using the Family Setup modal that already
+  // existed: a sample family to explore, or their own from scratch. Both paths
+  // already worked; only the moment of choosing is new.
+  //
+  // A patient/demo session still seeds silently, because there is nobody there
+  // to ask and a companion with no memories is not a demo of anything. That is
+  // the "Try the companion" path, which is a demo by name.
   useEffect(() => {
-    if (user && !demoSeeded) {
-      // Per-circle flag: each new family gets the sample content once, and a
-      // second account on the same browser doesn't inherit the first's flag.
-      const seededKey = `yadira_${getCircleId()}_seeded_demo`;
-      const isFirstLogin = localStorage.getItem(seededKey) !== 'true';
-      if (isFirstLogin) {
-        setMemories(DEMO_MEMORIES);
-        setFaqs(DEMO_FAQS);
-        setLogs(DEMO_LOGS);
-        setRoutine(DEMO_ROUTINE);
-        localStorage.setItem(seededKey, 'true');
-        setDemoSeeded(true);
-        if (sessionRole === 'patient') {
-          toastSuccess('Welcome back', `${patientName || 'Eleanor'}, you are safe and supported.`);
-        } else {
-          toastSuccess('Welcome, Thomas!', `${patientName || 'Eleanor'}'s profile is loaded and ready`);
-        }
-      }
+    if (!user || demoSeeded) return;
+    // Per-circle flag: each new family gets this once, and a second account on
+    // the same browser doesn't inherit the first's flag.
+    const seededKey = `yadira_${getCircleId()}_seeded_demo`;
+    if (localStorage.getItem(seededKey) === 'true') return;
+
+    if (sessionRole === 'patient') {
+      setMemories(DEMO_MEMORIES);
+      setFaqs(DEMO_FAQS);
+      setLogs(DEMO_LOGS);
+      setRoutine(DEMO_ROUTINE);
+      localStorage.setItem(seededKey, 'true');
+      setDemoSeeded(true);
+      toastSuccess('Welcome back', `${patientName || 'Eleanor'}, you are safe and supported.`);
+      return;
     }
+
+    // Caregiver: ask rather than assume. Marked handled immediately so the
+    // effect doesn't reopen the modal on every re-render; the flag is written
+    // when they choose (or when they close, meaning "start empty").
+    setDemoSeeded(true);
+    setFirstRunSetup(true);
   }, [user, demoSeeded, sessionRole, patientName]);
 
   useEffect(() => {
@@ -476,7 +611,7 @@ function AppContent() {
     const settle = () => { if (!cancelled) setModeReady(true); };
     const poll = async () => {
       try {
-        const res = await fetch(`/api/shared-mode?circle=${encodeURIComponent(getCircleId())}`);
+        const res = await fetch(`/api/shared-mode?circle=${encodeURIComponent(getCircleId())}`, { headers: authHeaders() });
         if (res.ok) {
           const data = await res.json();
           if (!cancelled) applySharedMode(data?.mode);
@@ -532,7 +667,7 @@ function AppContent() {
   // share a voice, or the identities blur for the patient.
   const YADIRA_VOICES: Record<'female' | 'male', string> = {
     female: 'zippy-pecan-9151__design-voice-6cd2e59a',
-    male: 'zippy-pecan-9151__design-voice-457ee57f',
+    male: 'zippy-pecan-9151__design-voice-87c0a467',
   };
   const [aiUsage, setAiUsage] = useStoreDoc<{ lastInsightsAt?: number; lastRoutineAt?: number; caregiverChatCount?: number }>('aiUsage', {});
 
@@ -816,7 +951,7 @@ function AppContent() {
     // Cross-device sync via backend
     fetch('/api/aurora-mode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ active, circle: getCircleId() }),
     }).catch((err) => console.warn('[Yadira] aurora push failed', err));
   };
@@ -849,7 +984,7 @@ function AppContent() {
     let cancelled = false;
     const poll = async () => {
       try {
-        const res = await fetch(`/api/aurora-mode?circle=${encodeURIComponent(getCircleId())}`);
+        const res = await fetch(`/api/aurora-mode?circle=${encodeURIComponent(getCircleId())}`, { headers: authHeaders() });
         if (!res.ok || cancelled) return;
         const data = await res.json();
         if (typeof data?.active === 'boolean') setAuroraActiveState(data.active);
@@ -883,8 +1018,20 @@ function AppContent() {
     localStorage.setItem('yadira_caregiver_alert', JSON.stringify(state));
     fetch('/api/caregiver-alert', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active, circle: getCircleId() }),
+      headers: authHeaders(),
+      body: JSON.stringify({
+        active,
+        circle: getCircleId(),
+        // Rings the caregiver as well as raising the banner. Sent from here so
+        // the server needs no stored state of its own; when it is absent the
+        // alert behaves exactly as it always has.
+        escalationPhone: helpCall.escalationPhone || undefined,
+        patientName: profile.patientName,
+        caregiverName: profile.caregiverName,
+        region: helpCall.region || undefined,
+        // Caregiver Pro gates the phone call, never the alert itself.
+        isPremium,
+      }),
     }).catch((err) => console.warn('[Yadira] caregiver-alert push failed', err));
   };
 
@@ -900,7 +1047,7 @@ function AppContent() {
     localStorage.setItem('yadira_lucidity_alert', JSON.stringify(state));
     fetch('/api/lucidity-alert', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ active, circle: getCircleId() }),
     }).catch((err) => console.warn('[Yadira] lucidity-alert push failed', err));
   };
@@ -926,8 +1073,8 @@ function AppContent() {
       const circle = encodeURIComponent(getCircleId());
       try {
         const [helpRes, lucidRes] = await Promise.all([
-          fetch(`/api/caregiver-alert?circle=${circle}`),
-          fetch(`/api/lucidity-alert?circle=${circle}`),
+          fetch(`/api/caregiver-alert?circle=${circle}`, { headers: authHeaders() }),
+          fetch(`/api/lucidity-alert?circle=${circle}`, { headers: authHeaders() }),
         ]);
         if (cancelled) return;
         if (helpRes.ok) {
@@ -992,11 +1139,48 @@ function AppContent() {
 
   // Patient tap: raise the alert, then comfort — the companion immediately
   // reassures them that a real person is coming.
+  //
+  // Pressing again is not an error and must never be met with silence. Someone
+  // frightened presses a button repeatedly precisely because they are not sure
+  // it worked, and that is the moment they most need to hear a voice. The
+  // caregiver's phone is not rung again — that is the cooldown, and it is
+  // right — but the person in the room is answered every single time.
+  const repeatComfortRef = useRef(0);
   const handlePatientAlert = () => {
-    if (caregiverAlert.active) return; // already raised
-    sendCaregiverAlert(true);
     const name = caregiverName || 'Your caregiver';
-    const comfort = `${name} has been told, ${patientName || 'dear'}. They will come to you soon. I'm right here with you until then.`;
+    const dear = patientName || 'dear';
+    const alreadyRaised = caregiverAlert.active;
+
+    if (!alreadyRaised) sendCaregiverAlert(true);
+
+    // Said aloud, so it must sound like reassurance rather than a status
+    // update. Nothing here mentions calls, cooldowns, or anything technical —
+    // only that a person knows and is coming.
+    //
+    // On an unlinked device there is nobody at the other end, so none of these
+    // lines may claim there is. Telling a person with dementia that someone
+    // has been told and is coming, when no message left the tablet, is exactly
+    // the disorientation this app exists to prevent — and they would sit and
+    // wait on it. The unlinked lines give the one thing that is still true:
+    // presence.
+    const firstTime = helpReachesCaregiver
+      ? `${name} has been told, ${dear}. They will come to you soon. I'm right here with you until then.`
+      : `I'm right here with you, ${dear}. You're not on your own — I'm staying right here.`;
+    const againOptions = helpReachesCaregiver
+      ? [
+          `${name} already knows, ${dear}, and they're on their way to you. Let's wait together — I'm right here.`,
+          `I've told ${name}, and they're coming. It won't be long. Stay with me until they get here.`,
+          `${name} is on their way, ${dear}. You did the right thing. I'm not going anywhere.`,
+        ]
+      : [
+          `I'm still here, ${dear}. Let's stay together a while.`,
+          `You're not on your own. I'm right beside you, ${dear}.`,
+          `I'm here, ${dear}, and I'm not going anywhere. Take your time.`,
+        ];
+    const comfort = alreadyRaised
+      ? againOptions[repeatComfortRef.current++ % againOptions.length]
+      : firstTime;
+
     appendChatMessage({
       id: `msg-alert-${Date.now()}`,
       role: 'model',
@@ -1370,7 +1554,14 @@ function AppContent() {
     // family replaces the profile, memories, FAQs, logs, and routine. A real
     // incident (a stray zoom gesture) once wiped a family's data; this
     // confirm plus Care Lock makes that path unrepeatable.
-    if (!window.confirm(`Load "${label}" into this care circle? This REPLACES the current profile, memories, FAQs, logs, and routine.`)) {
+    //
+    // Skipped on first run, where there is nothing to destroy: warning someone
+    // that their empty circle is about to be REPLACED, seconds after asking
+    // them to choose, reads as a threat rather than a safeguard.
+    if (
+      !firstRunSetup &&
+      !window.confirm(`Load "${label}" into this care circle? This REPLACES the current profile, memories, FAQs, logs, and routine.`)
+    ) {
       return;
     }
     setProfile(pack.profile);
@@ -1402,12 +1593,33 @@ function AppContent() {
     localStorage.setItem('yadira_shared_mode', JSON.stringify({ mode: p.patientMode, at: Date.now() }));
     fetch('/api/shared-mode', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders(),
       body: JSON.stringify({ mode: p.patientMode, circle: getCircleId() }),
     }).catch(() => {});
 
     setShowFamilySetup(false);
     toastSuccess('Care circle ready', `${label} is loaded and ready.`);
+
+    // Straight from choosing into the walkthrough, once, for a caregiver who
+    // has just arrived. Anyone who returns to Family Setup later has already
+    // seen it and does not need it again.
+    if (firstRunSetup) {
+      setFirstRunSetup(false);
+      if (localStorage.getItem(tourSeenKey(getCircleId())) !== 'true') setShowTour(true);
+    }
+  };
+
+  /** The walkthrough is dismissed for good once seen — reopenable from the header. */
+  const closeTour = () => {
+    setShowTour(false);
+    try { localStorage.setItem(tourSeenKey(getCircleId()), 'true'); } catch { /* non-fatal */ }
+  };
+
+  /** Closing first-run setup without choosing means "start with nothing". */
+  const skipFirstRunSetup = () => {
+    setFirstRunSetup(false);
+    localStorage.setItem(`yadira_${getCircleId()}_seeded_demo`, 'true');
+    if (localStorage.getItem(tourSeenKey(getCircleId())) !== 'true') setShowTour(true);
   };
 
   // Stop whatever Yadira is saying, right now. Bumping the speak generation
@@ -1585,7 +1797,7 @@ function AppContent() {
   }, [voiceEnabled, activeTab]);
 
   // Handle Patient message submission
-  const handleSendMessage = async (textToSend: string, emotion?: { emotion: string; confidence: number; tone: string }, mediaInsight?: { description: string; emotion: string; suggestions: string[] }) => {
+  const handleSendMessage = async (textToSend: string, emotion?: Message['emotion'], mediaInsight?: { description: string; emotion: string; suggestions: string[] }) => {
     if (!textToSend.trim()) return;
 
     const userMsgId = `msg-${Date.now()}`;
@@ -1624,7 +1836,16 @@ function AppContent() {
       // Inject emotion/media context into the prompt
       let contextualMessage = textToSend;
       if (emotion) {
-        contextualMessage += ` [Detected emotion: ${emotion.emotion}]`;
+        // The companion is told HOW this was known, because the two deserve
+        // different weight. A tremor heard in the voice can contradict the
+        // words outright — "I'm fine", said unsteadily — and the companion
+        // should be able to follow the voice rather than the sentence. A
+        // reading inferred from wording is only a restatement of what it can
+        // already see, so it is labelled as the weaker signal it is.
+        contextualMessage +=
+          emotion.source === 'voice'
+            ? ` [Heard in their voice: ${emotion.emotion}${emotion.tone ? ` — ${emotion.tone}` : ''}. This is how they SOUNDED, which may not match their words. Trust it over the wording if they differ.]`
+            : ` [Detected emotion: ${emotion.emotion}]`;
       }
       if (mediaInsight) {
         contextualMessage += ` [Media insight: ${mediaInsight.description}. Emotion: ${mediaInsight.emotion}]`;
@@ -1636,6 +1857,9 @@ function AppContent() {
         body: JSON.stringify({
           message: contextualMessage,
           history: serverHistory,
+          // Only ever present while developer mode is on, and the server
+          // ignores it unless DEV_MODE_SECRET is configured there and matches.
+          devToken: devToken() || undefined,
           caregiverSettings,
           patientMode,
           representedPersona,
@@ -2031,6 +2255,7 @@ function AppContent() {
               src="/yadira-logo.png"
               alt="Yadira"
               id="app-logo-icon"
+              onClick={handleLogoTap}
               className="w-[52px]"
             />
             <span className="hidden sm:inline-block text-xs font-semibold px-2 py-0.5 rounded-full bg-[#E8F1EB] text-[#3A5D45] uppercase tracking-wider border border-[#CEDFCF]">
@@ -2071,15 +2296,37 @@ function AppContent() {
             </div>
           )}
 
-          {/* Return to camp — Hattie's check-in, patient side */}
+          {/* Return to camp — Hattie's check-in, patient side.
+              Once they've checked in today the tent carries a small check and
+              warms to the "done" green. Someone who cannot remember whether
+              they've already had their visit with Hattie can see that they
+              have — and camp stays open either way, so a second visit is
+              never refused. */}
           {activeTab === 'patient' && (
             <button
               id="btn-camp"
               onClick={() => setCampOpen(true)}
-              className="p-2 sm:p-2.5 rounded-xl border border-[#E3DFC2] bg-white text-[#A6A27B] hover:text-[#3A5D45] hover:border-[#CEDFCF] transition-all"
-              title="Visit Hattie at camp"
+              className={`relative p-2 sm:p-2.5 rounded-xl border transition-all ${
+                todaysCheckIn
+                  ? 'border-[#CEDFCF] bg-[#E8F1EB] text-[#3A5D45]'
+                  : 'border-[#E3DFC2] bg-white text-[#A6A27B] hover:text-[#3A5D45] hover:border-[#CEDFCF]'
+              }`}
+              title={todaysCheckIn ? "You've visited Hattie today" : 'Visit Hattie at camp'}
+              aria-label={
+                todaysCheckIn
+                  ? "Visit Hattie at camp — today's check-in is done"
+                  : 'Visit Hattie at camp'
+              }
             >
               <Tent className="w-5 h-5" />
+              {todaysCheckIn && (
+                <span
+                  className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#3A5D45] border-2 border-white flex items-center justify-center"
+                  aria-hidden="true"
+                >
+                  <Check className="w-2.5 h-2.5 text-white" strokeWidth={3.5} />
+                </span>
+              )}
             </button>
           )}
 
@@ -2124,6 +2371,20 @@ function AppContent() {
             </button>
           )}
 
+          {/* Reopen the walkthrough. Hidden on the patient's screen and under
+              Care Lock, like every other caregiver control up here. */}
+          {!isPatientSession && !careLocked && (
+            <button
+              id="btn-tour"
+              onClick={() => setShowTour(true)}
+              className="p-2 sm:p-2.5 rounded-xl border border-[#E3DFC2] bg-white text-[#A6A27B] hover:text-[#3A5D45] hover:border-[#CEDFCF] transition-all"
+              title="How Yadira works — the caregiver walkthrough"
+              aria-label="Open the caregiver walkthrough"
+            >
+              <HelpCircle className="w-5 h-5" />
+            </button>
+          )}
+
           {/* Care Lock — tap to lock this device to the patient view; press
               and hold 3s to unlock. A confused zoom gesture can't do either
               by accident. */}
@@ -2156,6 +2417,31 @@ function AppContent() {
             {careLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
           </button>
 
+          {/* Hand over — back to the role screen, still signed in.
+              Sits immediately beside Log out because that is the button
+              caregivers were reaching for: the only route to the role screen
+              used to be signing out, which removes the account and so breaks
+              the very connection they were trying to hand over. */}
+          {!isPatientSession && !careLocked && (
+            <button
+              id="btn-hand-over"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Hand this device to ${patientName || 'them'}?\n\nYou stay signed in — this only returns to the choose-your-role screen, where they can tap "I'm a Patient".\n\nFor their own tablet, the padlock (Care Lock) is better: it hides the caregiver controls entirely.`
+                  )
+                ) {
+                  handOverDevice();
+                }
+              }}
+              className="p-2 sm:p-2.5 rounded-xl border border-[#E3DFC2] bg-white text-[#A6A27B] hover:text-[#3A5D45] hover:border-[#CEDFCF] transition-all"
+              title="Hand this device over — back to the role screen, still signed in"
+              aria-label="Hand this device over, staying signed in"
+            >
+              <UserRoundCheck className="w-5 h-5" />
+            </button>
+          )}
+
           {/* Log out — returns to the role-selection/login screen. Confirmed
               first so a patient can't accidentally end their own session.
               Hidden under Care Lock: ending the session IS destructive. */}
@@ -2163,9 +2449,15 @@ function AppContent() {
             <button
               id="btn-logout"
               onClick={async () => {
+                // Logging out is what unlinks a patient's device, and it does
+                // not look like it. The account on the device is the ONLY
+                // thing putting it in your care circle: without it the help
+                // button raises an alert nobody receives. Said here because
+                // this is the moment it happens, and because the alternative
+                // — Care Lock — is one button away and does the job properly.
                 const message = isPatientSession
                   ? 'Return to the Yadira login screen? (Caregiver use only)'
-                  : 'Log out of Yadira and return to the login screen?';
+                  : `Log out of Yadira and return to the login screen?\n\nIf this is ${patientName || 'the patient'}'s own device, logging out disconnects it from your care circle — their help button will stop reaching you.\n\nTo hand the device over instead, cancel and use the padlock (Care Lock).`;
                 if (window.confirm(message)) {
                   await logout();
                 }
@@ -2186,6 +2478,45 @@ function AppContent() {
           onSelect={openRoom}
           onClose={() => setShowRoomsMenu(false)}
         />
+      )}
+
+      {/* First-run care circle, and the caregiver's walkthrough.
+          BOTH are gated on this not being the patient's screen. A modal that
+          interrupts, demands a sequence and hands out instructions is the
+          opposite of what the companion side is for — and under Care Lock the
+          device IS the patient's, whatever the session role underneath says. */}
+      {!isPatientSession && !careLocked && firstRunSetup && (
+        <FamilySetup firstRun onClose={skipFirstRunSetup} onApply={applyFamilyPack} />
+      )}
+      {!isPatientSession && !careLocked && showTour && (
+        <CaregiverTour
+          patientName={patientName}
+          onClose={closeTour}
+          onOpenSettings={() => {
+            setActiveTab('caregiver');
+            setCaregiverTab('settings');
+          }}
+        />
+      )}
+
+      {/* Developer mode is LOUD. A protection that is silently absent is worse
+          than one that was never there, because everyone downstream still
+          believes in it. Rendered above everything, on every screen, for as
+          long as it lasts — including the patient view, because if this is
+          somehow on while a patient is using the device that is exactly when
+          somebody needs to notice. */}
+      {devActive && (
+        <div className="fixed top-0 inset-x-0 z-[60] bg-amber-500 text-amber-950 px-4 py-2 flex items-center justify-center gap-3 text-xs sm:text-sm font-bold shadow-md">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>Developer mode — the companion is not protected from breaking character. Not for use with a patient.</span>
+          <button
+            id="btn-end-dev-mode"
+            onClick={endDevMode}
+            className="shrink-0 px-3 py-1 rounded-full bg-amber-950 text-amber-50 font-bold hover:bg-amber-900 transition-colors"
+          >
+            Turn off
+          </button>
+        </div>
       )}
 
       {/* Aurora full-screen overlay — rendered above everything */}
@@ -2421,7 +2752,12 @@ function AppContent() {
 
                           {msg.emotion && (
                             <div className="mt-2">
-                              <EmotionBadge emotion={msg.emotion.emotion} confidence={msg.emotion.confidence} />
+                              <EmotionBadge
+                                emotion={msg.emotion.emotion}
+                                confidence={msg.emotion.confidence}
+                                source={msg.emotion.source}
+                                tone={msg.emotion.tone}
+                              />
                             </div>
                           )}
 
@@ -2509,11 +2845,17 @@ function AppContent() {
 
                   {/* The help button — always visible, full width, one tap
                       reaches a real human. Confirmation state stays until the
-                      caregiver acknowledges from the Hub. */}
+                      caregiver acknowledges from the Hub.
+
+                      Deliberately NOT disabled once raised. Someone frightened
+                      presses again because they are not sure it worked, and a
+                      button that refuses to respond is the cruellest possible
+                      answer to that. It stays pressable, and every press is
+                      met with reassurance — the caregiver's phone is not rung
+                      again, but the person in the room is always answered. */}
                   <button
                     id="btn-alert-caregiver"
                     onClick={handlePatientAlert}
-                    disabled={caregiverAlert.active}
                     className={`w-full mt-1 px-4 py-3.5 rounded-2xl text-base font-extrabold transition-all duration-200 active:scale-[0.98] shadow-xs border-2 flex items-center justify-center gap-2.5 ${
                       caregiverAlert.active
                         ? 'bg-[#F2FAF4] border-[#CEDFCF] text-[#3A5D45]'
@@ -2523,7 +2865,9 @@ function AppContent() {
                     {caregiverAlert.active ? (
                       <>
                         <Check className="w-5 h-5" />
-                        {caregiverName || 'Your caregiver'} has been told — they're coming
+                        {helpReachesCaregiver
+                          ? `${caregiverName || 'Your caregiver'} has been told — they're coming`
+                          : "I'm right here with you"}
                       </>
                     ) : (
                       <>
@@ -3283,6 +3627,128 @@ function AppContent() {
                     </div>
                   </button>
 
+                  {/* Help-button call — the patient presses "I need my
+                      caregiver" and this number rings. Yadira does NOT phone
+                      the patient: CALL-E speaks in its own voice, and a
+                      familiar name in an unfamiliar voice is not the same
+                      person to someone whose recognition is failing. A
+                      caregiver knows exactly what the call is, so here it
+                      costs nothing and gains everything. */}
+                  <div className="p-4 rounded-2xl border border-rose-200 bg-rose-50/40 flex flex-col">
+                    <span className="text-xs font-extrabold uppercase tracking-wider text-[#2C2C2A] flex items-center justify-between gap-1.5">
+                      <span className="flex items-center gap-1.5">
+                        <Phone className="w-3.5 h-3.5 text-rose-500" /> Call me when they need me
+                      </span>
+                      <span
+                        className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${
+                          isPremium ? 'bg-[#3A5D45] text-white' : 'bg-[#EAE8DD] text-[#7E7D76]'
+                        }`}
+                      >
+                        {isPremium ? 'Pro' : 'Pro only'}
+                      </span>
+                    </span>
+                    <span className="text-[10px] text-[#5E5D57] leading-tight mt-1 block">
+                      When {profile.patientName || 'they'} press the help button, Yadira raises the alert here{' '}
+                      <i>and</i> calls your phone. A banner is easy to miss; a ringing phone is not. The call
+                      usually takes a minute or two to come through, so the banner is always first.
+                    </span>
+                    <label className="sr-only" htmlFor="help-call-phone">
+                      Your own phone number, in full international form
+                    </label>
+                    <input
+                      id="help-call-phone"
+                      type="tel"
+                      inputMode="tel"
+                      value={helpCall.escalationPhone || ''}
+                      onChange={(e) => setHelpCall({ ...helpCall, escalationPhone: e.target.value })}
+                      placeholder="+15551234567"
+                      className="mt-2.5 w-full text-sm px-3 py-2 rounded-xl border border-rose-200 bg-white focus:outline-none focus:ring-2 focus:ring-rose-300/40"
+                    />
+                    <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
+                      <b>Your number, not theirs.</b> Full international form, e.g. +15551234567.
+                    </span>
+                    <label className="sr-only" htmlFor="check-in-region">
+                      Where you are — sets which line the call comes from
+                    </label>
+                    <select
+                      id="check-in-region"
+                      value={helpCall.region || ''}
+                      onChange={(e) => setHelpCall({ ...helpCall, region: e.target.value })}
+                      className="mt-2 w-full text-sm px-3 py-2 rounded-xl border border-rose-200 bg-white focus:outline-none focus:ring-2 focus:ring-rose-300/40"
+                    >
+                      <option value="">Where are you? (sets the calling line)</option>
+                      {CALLE_REGIONS.map((r) => (
+                        <option key={r.code} value={r.code}>
+                          {r.label}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      id="btn-test-help-call"
+                      onClick={sendTestCall}
+                      disabled={testingCall}
+                      className="mt-2 w-full flex items-center justify-center gap-2 text-sm font-bold px-3 py-2.5 rounded-xl border-2 border-rose-300 bg-white text-rose-700 disabled:opacity-60 hover:bg-rose-50 transition-colors"
+                    >
+                      {testingCall ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Phone className="w-4 h-4" />}
+                      {testingCall ? 'Calling you…' : 'Send me a test call'}
+                    </button>
+                    <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
+                      Hear it once now, so you know what it sounds like — and so you can save the number as a
+                      contact. The test says plainly that nothing is wrong.
+                    </span>
+                    <span className="text-[10px] text-[#7E7D76] leading-tight mt-2 block">
+                      The call says only that {profile.patientName || 'they'} asked for you, and when. It never
+                      discusses their health, and repeated presses will not ring you over and over. It comes from
+                      an unfamiliar number — worth saving as a contact once you have seen it, so it is not
+                      silenced at four in the morning.
+                    </span>
+                    {/* The one setup step nothing else can do for them. A test
+                        call proves this number rings; it proves nothing about
+                        the tablet in the other room, which reaches you only if
+                        it is signed in to this same account. */}
+                    <div className="mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border border-[#E3DFC2] bg-[#FCFAF5] text-[#5E5D57]">
+                      <b className="block mb-0.5">
+                        {profile.patientName || 'Their'} device has to stay signed in to this account.
+                      </b>
+                      On their tablet: sign in as <i>you</i>, then press <b>hand over</b> in the header.
+                      That returns to the role screen with your account still on the device, so when they
+                      tap <b>I'm a Patient</b> they land inside your circle. Add the <b>padlock</b>
+                      (Care Lock) as well for a device that stays with them — it hides the caregiver
+                      controls so a stray touch cannot reach them.
+                      <span className="block mt-1">
+                        <b>Do not log out first.</b> Logging out is what disconnects the device — after it,
+                        the patient button becomes <b>Try the companion</b> — a demo whose help button never
+                        reaches you.
+                      </span>
+                    </div>
+                    {helpCallStatus && (
+                      <div
+                        className={`mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border ${
+                          helpCallStatus.status === 'placed'
+                            ? 'border-[#CEDFCF] bg-[#F2FAF4] text-[#3A5D45]'
+                            : helpCallStatus.status === 'failed'
+                              ? 'border-rose-300 bg-rose-50 text-rose-800'
+                              : 'border-[#E3DFC2] bg-[#FCFAF5] text-[#5E5D57]'
+                        }`}
+                      >
+                        <b className="block mb-0.5">
+                          Last help press ·{' '}
+                          {new Date(helpCallStatus.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </b>
+                        {helpCallStatus.detail}
+                      </div>
+                    )}
+                    {!isPremium && (
+                      <div className="mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border border-[#E3DFC2] bg-[#FCFAF5] text-[#5E5D57]">
+                        <b className="block mb-0.5">The alert is free. The phone call is Caregiver Pro.</b>
+                        {profile.patientName || 'Their'} help button still reaches you here the moment it is
+                        pressed — that never costs anything. Pro ($5/week) adds the phone ringing too, for the times
+                        you are not looking at a screen.
+                      </div>
+                    )}
+                  </div>
+
                   {/* Caregiver Pro — the whole companion is free; only the
                       caregiver's AI care reports are the paid tier. */}
                   <div className={`p-4 rounded-2xl border flex flex-col justify-between ${isPremium ? 'border-[#CEDFCF] bg-[#F2FAF4]' : 'border-[#E3DFC2] bg-[#FCFAF5]'}`}>
@@ -3293,8 +3759,8 @@ function AppContent() {
                         </span>
                         <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
                           {isPremium
-                            ? `Active — unlimited AI care reports (routines & clinical insights) for this caregiver. The companion itself is free for your family, always.`
-                            : `The companion is free for your family — ${representedPersona || 'the loved one'}'s natural voice, Call Mode, Session Memory, calming rooms, and photos, always. Caregiver Pro ($5/week) adds unlimited AI care reports; free includes one routine + one insights report each week. Run a care facility? Email partnerships@yadira.chat about a per-unit partnership.`}
+                            ? `Active — the help button rings your phone, plus unlimited AI care reports (routines & clinical insights) for this caregiver. The companion itself is free for your family, always.`
+                            : `The companion is free for your family — ${representedPersona || 'the loved one'}'s natural voice, Call Mode, Session Memory, calming rooms, and photos, always. Caregiver Pro ($5/week) makes the help button ring your phone as well as the screen, and adds unlimited AI care reports; free includes one routine + one insights report each week. Run a care facility? Email partnerships@yadira.chat about a per-unit partnership.`}
                         </span>
                       </div>
                       <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${isPremium ? 'bg-[#3A5D45] text-white' : 'bg-[#EAE8DD] text-[#7E7D76]'}`}>
@@ -4168,6 +4634,9 @@ function AppContent() {
                         toastSuccess('Photo added', 'It is now in the family album. Tap its caption to reword it.');
                       }
                     }}
+                    // The caregiver is the only person who can fix a bad
+                    // model name, so they are the one who gets told what broke.
+                    showTechnicalErrors
                     isPremium={true}
                   />
                 </div>

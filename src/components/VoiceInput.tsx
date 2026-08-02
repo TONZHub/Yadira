@@ -2,9 +2,20 @@ import React, { useState, useRef } from 'react';
 import { Mic, MicOff, AlertTriangle } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useToast } from '../lib/ToastContext';
+import { readSpeechResults } from '../lib/speechTranscript';
+
+export interface DetectedEmotion {
+  emotion: string;
+  confidence: number;
+  tone: string;
+  /** How it was known. 'voice' was heard in the audio — pace, tremor, breath;
+      'text' was inferred from the wording alone, which cannot tell a bright
+      "I'm fine" from a flat one. The badge says which. */
+  source?: 'voice' | 'text';
+}
 
 interface VoiceInputProps {
-  onTranscript: (text: string, emotion?: { emotion: string; confidence: number; tone: string }) => void;
+  onTranscript: (text: string, emotion?: DetectedEmotion) => void;
   disabled?: boolean;
   isPremium?: boolean;
 }
@@ -32,6 +43,26 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
   const dataArrayRef = useRef<Uint8Array | null>(null);
   const [waveformLevel, setWaveformLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordStartedAtRef = useRef(0);
+  // Loudest sample seen, as a fraction of full scale, and whether the analyser
+  // was genuinely running when we read it.
+  //
+  // The distinction is the whole bug. This meter began life as decoration for
+  // the waveform bar, so every way it could fail was harmless and silently
+  // caught. Then the silence guard started trusting it, and each of those
+  // harmless failures became "the microphone does not work":
+  //
+  //   · Safari exposes only webkitAudioContext, so `new AudioContext()` threw,
+  //     the catch below swallowed it, and the level stayed 0 forever.
+  //   · A context that has not been resumed reads every bin as 0 while
+  //     reporting no error at all.
+  //
+  // Both reported a confident 0, the guard read 0 as "silent room", and every
+  // recording on that device was thrown away. An unmeasurable level must be
+  // reported as *unknown*, never as silence.
+  const peakAmplitudeRef = useRef(0);
+  const levelMeasuredRef = useRef(false);
+  const timeDataRef = useRef<Uint8Array | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recorderMimeRef = useRef('audio/webm');
   // Live-caption text mirrored in a ref so the async stop handler always
@@ -54,18 +85,14 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
     recognition.interimResults = true;
     recognition.lang = 'en-US';
 
-    let finalTranscript = '';
+    // Rebuilt from event.results each time, never accumulated — see
+    // src/lib/speechTranscript.ts. The appending version of this produced a
+    // transcript that restated itself with every word in a live call.
     recognition.onstart = () => {
-      finalTranscript = '';
+      liveTranscriptRef.current = '';
     };
     recognition.onresult = (event: any) => {
-      let interim = '';
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const text = event.results[i][0].transcript;
-        if (event.results[i].isFinal) finalTranscript += text + ' ';
-        else interim += text;
-      }
-      const full = (finalTranscript + interim).trim();
+      const full = readSpeechResults(event.results).text;
       liveTranscriptRef.current = full;
       setTranscript(full);
     };
@@ -103,25 +130,61 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
       audioChunksRef.current = [];
       recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       recorder.start();
+      recordStartedAtRef.current = Date.now();
+      peakAmplitudeRef.current = 0;
+      levelMeasuredRef.current = false;
       mediaRecorderRef.current = recorder;
     } catch {
       mediaRecorderRef.current = null; // captions-only mode
     }
 
-    // Waveform visualization
+    // Waveform visualization, and the level reading the silence guard depends on
     try {
-      const audioContext = new (window as any).AudioContext();
+      const AudioCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtor) throw new Error('no AudioContext');
+      const audioContext = new AudioCtor();
+      // Contexts can start suspended, and a suspended analyser returns zeros
+      // rather than an error. Resume before believing anything it says.
+      if (audioContext.state === 'suspended') await audioContext.resume().catch(() => {});
       audioContextRef.current = audioContext;
       const analyzer = audioContext.createAnalyser();
       analyzerRef.current = analyzer;
       audioContext.createMediaStreamSource(stream).connect(analyzer);
       const dataArray = new Uint8Array(analyzer.frequencyBinCount);
       dataArrayRef.current = dataArray;
+      timeDataRef.current = new Uint8Array(analyzer.fftSize);
       const updateWaveform = () => {
-        if (analyzerRef.current && dataArrayRef.current && mediaStreamRef.current) {
+        if (analyzerRef.current && dataArrayRef.current && timeDataRef.current && mediaStreamRef.current) {
+          // Two different measurements from the same analyser, because they
+          // answer two different questions.
+          //
+          // The bar is decorative, so it uses the mean of the frequency bins —
+          // it moves smoothly and looks like a voice.
           analyzerRef.current.getByteFrequencyData(dataArrayRef.current);
           const average = dataArrayRef.current.reduce((a, b) => a + b) / dataArrayRef.current.length;
           setWaveformLevel(average / 255);
+
+          // "Did anybody actually speak?" is a question about amplitude, so it
+          // reads the loudest SAMPLE from the time domain rather than the bar's
+          // spectral average — that average is a decibel mapping, and comparing
+          // it against an amplitude threshold only ever worked by coincidence.
+          // The time-domain waveform is centred on 128; distance from centre is
+          // amplitude.
+          analyzerRef.current.getByteTimeDomainData(timeDataRef.current);
+          let peak = 0;
+          for (let i = 0; i < timeDataRef.current.length; i++) {
+            const amplitude = Math.abs(timeDataRef.current[i] - 128) / 128;
+            if (amplitude > peak) peak = amplitude;
+          }
+          if (peak > peakAmplitudeRef.current) peakAmplitudeRef.current = peak;
+          // Only a running context that has actually seen a non-zero sample
+          // counts as a reading. A live microphone in a quiet room still has a
+          // noise floor; a flat zero means the plumbing failed, not that the
+          // room was silent, and calling that silence is what killed dictation.
+          if (peak > 0 && audioContextRef.current?.state === 'running') {
+            levelMeasuredRef.current = true;
+          }
+
           requestAnimationFrame(updateWaveform);
         }
       };
@@ -159,14 +222,25 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
     setIsAnalyzing(true);
     setAnalyzeStage('transcribe');
     let finalText = liveTranscriptRef.current.trim();
+    let heardTone: DetectedEmotion | null = null;
     try {
       // Whisper-grade pass — server picks the best configured provider.
-      if (recorded && recorded.size > 200) {
+      //
+      // The old floor here was 200 bytes, which a container header clears on
+      // its own: a fumbled tap sent silence to the model and got invented words
+      // back. Duration and peak level are sent too, so the server can refuse on
+      // evidence rather than on file size alone.
+      const durationMs = recordStartedAtRef.current ? Date.now() - recordStartedAtRef.current : undefined;
+      // Omitted, not zeroed, when the analyser never ran. An unreported level
+      // means "no reading"; a reported 0 would mean "silent room", and a
+      // browser that refused us an AudioContext has told us neither.
+      const peakAmplitude = levelMeasuredRef.current ? peakAmplitudeRef.current : undefined;
+      if (recorded && recorded.size > 1200) {
         const audio = await blobToBase64(recorded);
         const r = await fetch('/api/transcribe', {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ audio, mimeType: recorderMimeRef.current }),
+          body: JSON.stringify({ audio, mimeType: recorderMimeRef.current, durationMs, peakAmplitude }),
         });
         if (r.ok) {
           const data = await r.json();
@@ -174,6 +248,12 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
             finalText = data.text.trim();
             setTranscript(finalText);
           }
+          // Heard rather than inferred: the provider listened to the delivery,
+          // not just the words. When it comes back the text-analysis call
+          // below is skipped entirely — it is the weaker reading of the two,
+          // and running it anyway would cost the patient a round trip to
+          // second-guess something better.
+          if (data.voice?.emotion) heardTone = data.voice as DetectedEmotion;
         }
         // 501/502 → keep the live-caption text; dictation still works.
       }
@@ -192,6 +272,14 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
       return;
     }
 
+    // Already know how they sounded — nothing left to ask.
+    if (heardTone) {
+      setIsAnalyzing(false);
+      onTranscript(finalText, heardTone);
+      setTranscript('');
+      return;
+    }
+
     setAnalyzeStage('emotion');
     try {
       const response = await fetch('/api/analyze-emotion', {
@@ -201,7 +289,8 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
       });
       if (!response.ok) throw new Error(`Emotion analysis failed: ${response.statusText}`);
       const emotion = await response.json();
-      onTranscript(finalText, emotion);
+      // Inferred from wording, and labelled as such. It cannot hear a tremor.
+      onTranscript(finalText, { ...emotion, source: 'text' });
       setTranscript('');
     } catch (err) {
       const msg = `Emotion analysis error: ${err instanceof Error ? err.message : 'Unknown error'}`;

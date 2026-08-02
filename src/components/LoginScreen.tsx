@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import TermsModal, { TERMS_VERSION } from './TermsModal';
 import { useLargeFont } from '../lib/fontScale';
 import EvergreenBackdrop from './EvergreenBackdrop';
+import { readDeviceAccount } from '../lib/localSession';
 
 // The logo draw-in finishes around 2.5s and holds; the frame blanks near
 // 5.5s. Fade the intro out just before the blank so the wordmark never
@@ -35,6 +36,18 @@ export const LoginScreen: React.FC = () => {
     const t = window.setTimeout(finishIntro, INTRO_MS);
     return () => window.clearTimeout(t);
   }, [showIntro]);
+  // Is there a REAL account on this device for patient mode to inherit?
+  //
+  // "Is there a token?" was the wrong question. The demo button mints one, so
+  // a single tap made this screen claim "Connected to your care circle" for
+  // ever after, on a device connected to nothing — the precise false
+  // reassurance it was added to prevent. readDeviceAccount tells a real
+  // account from a demo's leftovers.
+  const account =
+    typeof window === 'undefined'
+      ? ({ state: 'none' } as const)
+      : readDeviceAccount(localStorage.getItem('yadira_token'), localStorage.getItem('yadira_user_id'));
+  const deviceHasAccount = account.state === 'linked';
   const [screen, setScreen] = useState<'role' | 'caregiver'>('role');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -195,11 +208,55 @@ export const LoginScreen: React.FC = () => {
               <div className="flex items-center gap-3">
                 <UserRound className="w-6 h-6 text-[#5C8D71]" />
                 <div>
-                  <p className="font-bold">I'm a Patient</p>
-                  <p className="text-xs text-[#7E7D76]">Start with one tap, no password</p>
+                  {/* The same tap does two genuinely different things, and
+                      until now they looked identical. With an account on the
+                      device it resumes the real thing; without one it is a
+                      demo that reaches nobody. Both are worth having — the
+                      first is how a handed-over tablet gets back in after a
+                      restart, the second is how anyone tries the companion —
+                      so they are labelled apart rather than one removed. */}
+                  <p className="font-bold">{deviceHasAccount ? 'I\'m a Patient' : 'Try the companion'}</p>
+                  <p className="text-xs text-[#7E7D76]">
+                    {deviceHasAccount
+                      ? 'Connected to your care circle — one tap, no password'
+                      : 'A demo, on this device only — not connected to a caregiver'}
+                  </p>
+                  {/* Name the account. A claim you can check beats a claim you
+                      have to trust — and if this is not the caregiver's email,
+                      the device is not set up the way they think it is. */}
+                  {deviceHasAccount && account.state === 'linked' && account.email && (
+                    <p className="text-[11px] text-[#8A8981] mt-0.5 break-all">
+                      Signed in as <span className="font-semibold">{account.email}</span>
+                    </p>
+                  )}
                 </div>
               </div>
             </button>
+            {!deviceHasAccount && (
+              <div className="rounded-xl border border-[#E3DFC2] bg-[#FCFAF5] p-3.5 text-left">
+                <p className="text-xs text-[#5A594F] leading-relaxed">
+                  <span className="font-bold text-[#2C2C2A]">Setting up the patient's own device?</span>{' '}
+                  Sign in below with the caregiver's account first. That account staying on the device
+                  is what connects their help button to your phone.
+                </p>
+                <p className="text-xs text-[#5A594F] leading-relaxed mt-2">
+                  Once you are in, <b>hand over</b> in the header brings you back to this screen still
+                  signed in — then they tap <b>I&rsquo;m a Patient</b>. On their own tablet, add the{' '}
+                  <b>padlock</b> as well, so the caregiver controls are out of reach.
+                </p>
+                <p className="text-xs text-[#5A594F] leading-relaxed mt-2">
+                  Tapping below <i>without</i> signing in starts a demo in a circle of its own. Nothing
+                  it raises reaches you.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setScreen('caregiver')}
+                  className="mt-2 text-xs font-bold text-[#3A5D45] underline"
+                >
+                  Sign in to connect this device
+                </button>
+              </div>
+            )}
             {/* The patient path stays frictionless — the caregiver is the
                 account holder who formally consents at signup. */}
             <p className="text-center text-[11px] text-[#8A8981] pt-1">
@@ -351,7 +408,7 @@ export const LoginScreen: React.FC = () => {
             {!isSignup && (
               <div className="mt-6 p-3 bg-[#F2FAF4] border border-[#CEDFCF] rounded-lg">
                 <p className="text-xs text-[#3A5D45]">
-                  <span className="font-semibold">New here?</span> Tap <span className="font-semibold">Sign Up</span> to create your own account — it comes with a fully populated sample family to explore. Or use <span className="font-semibold">I'm a Patient</span> for a one-tap look at the companion.
+                  <span className="font-semibold">New here?</span> Tap <span className="font-semibold">Sign Up</span> and you'll be asked whether to explore a sample family or set up the person you care for. Or use <span className="font-semibold">Try the companion</span> for a one-tap look, on this device only.
                 </p>
               </div>
             )}
