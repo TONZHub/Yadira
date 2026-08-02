@@ -30,16 +30,48 @@
 // and the failure mode of losing the counters is a slightly larger bill, not
 // a family locked out.
 
-export type BudgetTier = 'verified' | 'local';
+export type BudgetTier = 'pro' | 'verified' | 'local';
 
-/** A signed-in family. Room for a very heavy day and then some. */
-export const AI_DAILY_PER_CIRCLE_VERIFIED = 600;
+function envInt(name: string, fallback: number): number {
+  const raw = Number(process.env[name]);
+  return Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+}
 
-/** A demo circle — including every forged token, which is the point. */
-export const AI_DAILY_PER_CIRCLE_LOCAL = 80;
+// ---- What these cost ----
+//
+// A measured stress test put one family at $6.10/week — about $0.87 a day —
+// at roughly fifteen minutes of companion use. Fifteen minutes is somewhere
+// near 25 exchanges, so the old 600 was never a budget: it sat 24x above what
+// anyone actually did, which means it bounded abuse and nothing else. The
+// entire $6.10 was free-tier spend, because the companion is free and only
+// the caregiver's reports are paid.
+//
+// So the ceiling now follows who is paying:
+
+/** Caregiver Pro. Unchanged — a paying family should never meet a ceiling. */
+export const AI_DAILY_PER_CIRCLE_PRO = envInt('AI_DAILY_PRO', 600);
+
+/**
+ * A signed-in family on the free tier.
+ *
+ * Deliberately near a normal day rather than far above it: a short daily
+ * visit finishes at full quality, and a heavy day degrades instead of
+ * billing. It degrades rather than stopping — /api/chat falls through to the
+ * simulation companion and the device voice — so "the companion is free"
+ * stays literally true, which is the promise this number had to keep.
+ */
+export const AI_DAILY_PER_CIRCLE_VERIFIED = envInt('AI_DAILY_FREE', 30);
+
+/**
+ * A demo circle — including every forged token, which is the point.
+ *
+ * Held level with the free tier rather than below it. Lower, and signing out
+ * would buy a bigger allowance than signing in.
+ */
+export const AI_DAILY_PER_CIRCLE_LOCAL = envInt('AI_DAILY_LOCAL', 30);
 
 /** Per address, across all circles. A facility NAT is one IP, many families. */
-export const AI_DAILY_PER_IP = 1500;
+export const AI_DAILY_PER_IP = envInt('AI_DAILY_IP', 1500);
 
 interface Usage {
   day: string;
@@ -67,7 +99,9 @@ export function overBudget(key: string, limit: number, now = Date.now()): boolea
 }
 
 export function circleLimitFor(tier: BudgetTier): number {
-  return tier === 'verified' ? AI_DAILY_PER_CIRCLE_VERIFIED : AI_DAILY_PER_CIRCLE_LOCAL;
+  if (tier === 'pro') return AI_DAILY_PER_CIRCLE_PRO;
+  if (tier === 'verified') return AI_DAILY_PER_CIRCLE_VERIFIED;
+  return AI_DAILY_PER_CIRCLE_LOCAL;
 }
 
 export interface BudgetCheck {

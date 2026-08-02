@@ -5,6 +5,7 @@
 // the reader is often an exhausted family member, not a lawyer.
 
 import React from 'react';
+import { PRICE_BOTH } from '../lib/pricing';
 import { X } from 'lucide-react';
 
 export const TERMS_VERSION = '2026-07-16.2';
@@ -99,7 +100,7 @@ export const TermsModal: React.FC<TermsModalProps> = ({ onClose, onAccept }) => 
 
         <H>6. Payments</H>
         <p>
-          The patient-facing companion is free. Caregiver Pro is a $5/week subscription billed
+          The patient-facing companion is free. Caregiver Pro is a {PRICE_BOTH} subscription billed
           through Stripe; you can cancel any time via the billing portal and access continues to
           the end of the paid period. Care-facility partnerships are billed per-unit under
           separate agreement.

@@ -11,6 +11,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Brain, Heart, Moon, Phone, RefreshCw, Sliders, Sparkles, Sun } from 'lucide-react';
+import { PLANS, PRICE_SHORT, PRICE_BOTH, ANNUAL_SAVING, type Plan } from '../../lib/pricing';
 import { CALLE_REGIONS } from '../../server/calleRegions';
 import { THEMES } from '../../lib/theme';
 import type { CaregiverProfile, CompanionPersonality } from '../../types';
@@ -50,7 +51,7 @@ export interface SettingsTabProps {
     currentPeriodEnd?: number;
   };
   premiumBusy: boolean;
-  startPremiumCheckout: () => void;
+  startPremiumCheckout: (plan?: Plan) => void;
   openBillingPortal: () => void;
   setPremium: (next: any) => void;
   playSoundCue: (cue: string) => void;
@@ -415,7 +416,7 @@ const SettingsTab: React.FC<SettingsTabProps> = (props) => {
             <div className="mt-2.5 text-[11px] leading-snug rounded-xl px-3 py-2 border border-[#E3DFC2] bg-[#FCFAF5] text-[#5E5D57]">
               <b className="block mb-0.5">The alert is free. The phone call is Caregiver Pro.</b>
               {profile.patientName || 'Their'} help button still reaches you here the moment it is
-              pressed — that never costs anything. Pro ($5/week) adds the phone ringing too, for the times
+              pressed — that never costs anything. Pro (${PRICE_SHORT}) adds the phone ringing too, for the times
               you are not looking at a screen.
             </div>
           )}
@@ -432,48 +433,74 @@ const SettingsTab: React.FC<SettingsTabProps> = (props) => {
               <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
                 {isPremium
                   ? `Active — the help button rings your phone, plus unlimited AI care reports (routines & clinical insights) for this caregiver. The companion itself is free for your family, always.`
-                  : `The companion is free for your family — ${representedPersona || 'the loved one'}'s natural voice, Call Mode, Session Memory, calming rooms, and photos, always. Caregiver Pro ($5/week) makes the help button ring your phone as well as the screen, and adds unlimited AI care reports; free includes one routine + one insights report each week. Run a care facility? Email partnerships@yadira.chat about a per-unit partnership.`}
+                  : `The companion is free for your family — ${representedPersona || 'the loved one'}'s natural voice, Call Mode, Session Memory, calming rooms, and photos, always. Caregiver Pro (${PRICE_BOTH}) makes the help button ring your phone as well as the screen, and adds unlimited AI care reports; free includes one routine + one insights report each week. Run a care facility? Email partnerships@yadira.chat about a per-unit partnership.`}
               </span>
             </div>
             <span className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full shrink-0 ${isPremium ? 'bg-[#3A5D45] text-white' : 'bg-[#EAE8DD] text-[#7E7D76]'}`}>
               {isPremium ? 'Pro' : 'Free'}
             </span>
           </div>
-          <button
-            type="button"
-            id="btn-toggle-premium"
-            disabled={premiumBusy}
-            onClick={() => {
-              if (!isPremium) {
-                startPremiumCheckout();
-              } else if (premium.customerId) {
-                openBillingPortal();
-              } else {
-                // Demo-toggled premium (no Stripe subscription behind it)
-                setPremium({ ...premium, unlocked: false });
-              }
-            }}
-            className={`mt-3 w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-60 disabled:pointer-events-none ${
-              isPremium
-                ? 'bg-white border border-[#E3DFC2] text-[#5E5D57] hover:bg-[#EAE8DD]'
-                : 'bg-[#3A5D45] text-white hover:bg-[#2B4633] shadow-xs'
-            }`}
-            title={
-              isPremium
-                ? premium.customerId
+          {/* Two plans, both shown. A caregiver deciding whether this is worth
+              it should not have to click through to Stripe to find out what
+              the annual option costs. */}
+          {!isPremium ? (
+            <div className="mt-3 space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  id="btn-toggle-premium"
+                  disabled={premiumBusy}
+                  onClick={() => startPremiumCheckout('monthly')}
+                  title={`Secure checkout via Stripe — ${PLANS.monthly.label}, cancel anytime`}
+                  className="py-2.5 px-2 rounded-xl text-xs font-bold bg-[#3A5D45] text-white hover:bg-[#2B4633] shadow-xs transition-all active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
+                >
+                  {premiumBusy ? 'One moment…' : PLANS.monthly.label}
+                </button>
+                <button
+                  type="button"
+                  id="btn-premium-annual"
+                  disabled={premiumBusy}
+                  onClick={() => startPremiumCheckout('annual')}
+                  title={`Secure checkout via Stripe — ${PLANS.annual.label}, cancel anytime`}
+                  className="relative py-2.5 px-2 rounded-xl text-xs font-bold bg-white border border-[#3A5D45] text-[#3A5D45] hover:bg-[#F2FAF4] transition-all active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
+                >
+                  {premiumBusy ? 'One moment…' : PLANS.annual.label}
+                  <span className="block text-[9px] font-semibold text-[#5C8D71] leading-tight">
+                    {PLANS.annual.perMonth}/mo · save {ANNUAL_SAVING}
+                  </span>
+                </button>
+              </div>
+              <p className="text-[10px] text-[#7E7D76] text-center leading-snug">
+                Secure checkout via Stripe. Cancel anytime.
+              </p>
+            </div>
+          ) : (
+            <button
+              type="button"
+              id="btn-toggle-premium"
+              disabled={premiumBusy}
+              onClick={() => {
+                if (premium.customerId) {
+                  openBillingPortal();
+                } else {
+                  // Demo-toggled premium (no Stripe subscription behind it)
+                  setPremium({ ...premium, unlocked: false });
+                }
+              }}
+              className="mt-3 w-full py-2.5 rounded-xl text-xs font-bold transition-all active:scale-95 disabled:opacity-60 disabled:pointer-events-none bg-white border border-[#E3DFC2] text-[#5E5D57] hover:bg-[#EAE8DD]"
+              title={
+                premium.customerId
                   ? 'Opens Stripe billing portal to manage or cancel'
                   : 'Turn off demo Caregiver Pro'
-                : 'Secure checkout via Stripe — $5/week, cancel anytime'
-            }
-          >
-            {premiumBusy
-              ? 'One moment…'
-              : isPremium
-                ? premium.customerId
+              }
+            >
+              {premiumBusy
+                ? 'One moment…'
+                : premium.customerId
                   ? 'Manage subscription'
-                  : 'Turn off Caregiver Pro'
-                : 'Get Caregiver Pro — $5/week'}
-          </button>
+                  : 'Turn off Caregiver Pro'}
+            </button>
+          )}
         </div>
 
         {/* Persona Configuration */}

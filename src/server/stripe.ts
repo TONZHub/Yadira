@@ -1,10 +1,10 @@
-// Stripe billing for Yadira Premium — $5/week per care circle.
+// Stripe billing for Yadira Caregiver Pro — monthly or annual, per care circle.
 // ------------------------------------------------------------------
 // Talks to Stripe's REST API directly with fetch (same pattern as the
 // Inworld/OpenRouter integrations) so no SDK dependency is needed.
 //
 // Flow (no webhooks, matching the client-writes-Firestore architecture):
-//   1. Caregiver clicks Unlock → POST /api/stripe/create-checkout-session
+//   1. Caregiver picks a plan → POST /api/stripe/create-checkout-session
 //      → browser redirects to Stripe Checkout.
 //   2. Stripe redirects back to the app with ?premium_session=cs_...
 //   3. Client calls GET /api/stripe/verify-session — the server confirms
@@ -17,6 +17,8 @@
 // Optional APP_URL overrides the redirect base (defaults to request origin).
 
 import express from 'express';
+import { PLANS, planOf } from '../lib/pricing';
+import { notePremium } from './premiumRegistry';
 
 const STRIPE_API = 'https://api.stripe.com/v1';
 
@@ -108,6 +110,11 @@ export function registerStripeRoutes(app: express.Express) {
     // checkout is how a paying caregiver gets orphaned from their purchase.
     const accountEmail = String((req as any).user?.email || '').trim().toLowerCase();
 
+    // Monthly or annual, from the button the caregiver pressed. Unrecognised
+    // values fall back to monthly rather than erroring: a caregiver who has
+    // decided to pay should never meet a validation message.
+    const chosen = PLANS[planOf(req.body?.plan)];
+
     // Pinned rather than left to the dashboard's dynamic payment-method
     // config: an account whose dashboard methods are unset/misconfigured
     // otherwise gets "No valid payment method types for this Checkout
@@ -121,9 +128,9 @@ export function registerStripeRoutes(app: express.Express) {
       'payment_method_types[1]': 'link',
       'line_items[0][quantity]': '1',
       'line_items[0][price_data][currency]': 'usd',
-      'line_items[0][price_data][unit_amount]': '500',
-      'line_items[0][price_data][recurring][interval]': 'week',
-      'line_items[0][price_data][product_data][name]': 'Yadira Caregiver Pro',
+      'line_items[0][price_data][unit_amount]': String(chosen.cents),
+      'line_items[0][price_data][recurring][interval]': chosen.interval,
+      'line_items[0][price_data][product_data][name]': `Yadira Caregiver Pro (${chosen.label})`,
       'line_items[0][price_data][product_data][description]':
         'Unlimited AI care reports — personalized routines and clinical insights. The companion itself stays free for your family; this sustains the professional caregiver tooling.',
       success_url: `${base}/?premium_session={CHECKOUT_SESSION_ID}`,
@@ -171,6 +178,9 @@ export function registerStripeRoutes(app: express.Express) {
       });
       const paid = session.payment_status === 'paid';
       const state = subscriptionState(session.subscription);
+      // Tell the budget middleware what Stripe just confirmed, so a caregiver
+      // who has this second paid for Pro is not held to the free ceiling.
+      notePremium(String(session.metadata?.circleId || ''), paid && state.active);
       res.json({
         active: paid && state.active,
         circleId: session.metadata?.circleId || null,
@@ -193,7 +203,9 @@ export function registerStripeRoutes(app: express.Express) {
 
     try {
       const sub = await stripeRequest('GET', `/subscriptions/${subscriptionId}`);
-      res.json(subscriptionState(sub));
+      const state = subscriptionState(sub);
+      notePremium(String(sub?.metadata?.circleId || req.query?.circle || ''), state.active);
+      res.json(state);
     } catch (err: any) {
       console.error('[Stripe] subscription-status failed:', err.message || err);
       res.status(502).json({ error: err.message || 'Failed to fetch subscription status' });
@@ -241,6 +253,7 @@ export function registerStripeRoutes(app: express.Express) {
         }).catch(() => {});
       }
 
+      notePremium(circle, subscriptionState(best).active);
       res.json({ found: true, ...subscriptionState(best) });
     } catch (err: any) {
       console.error('[Stripe] restore failed:', err.message || err);

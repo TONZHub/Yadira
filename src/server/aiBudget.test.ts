@@ -19,12 +19,13 @@ import {
   __resetAiBudget,
   AI_DAILY_PER_CIRCLE_LOCAL,
   AI_DAILY_PER_CIRCLE_VERIFIED,
+  AI_DAILY_PER_CIRCLE_PRO,
   AI_DAILY_PER_IP,
 } from './aiBudget';
 
 beforeEach(() => __resetAiBudget());
 
-const spend = (n: number, circle: string, ip: string, tier: 'verified' | 'local', now = Date.now()) => {
+const spend = (n: number, circle: string, ip: string, tier: 'pro' | 'verified' | 'local', now = Date.now()) => {
   let last = { allowed: true } as ReturnType<typeof checkAiBudget>;
   for (let i = 0; i < n; i++) last = checkAiBudget(circle, ip, tier, now);
   return last;
@@ -43,9 +44,45 @@ describe('a demo circle is bounded tightly — that is where forged tokens land'
     assert.equal(r.reason, 'circle');
   });
 
-  test('the local ceiling is far below the family one', () => {
-    // Not a magic-number assertion — the RELATIONSHIP is the design.
-    assert.ok(circleLimitFor('local') < circleLimitFor('verified') / 4);
+  test('signing out is never an upgrade', () => {
+    // The ceiling used to sit far below the family one, back when the family
+    // ceiling was 600 — a number 24x above what anyone actually used, so it
+    // bounded abuse and nothing else. Now that the free tier is sized to a
+    // real day, a demo ceiling BELOW it would mean logging out bought you a
+    // bigger allowance than signing in. Level is the relationship that
+    // matters; the IP cap is what still bounds a forged token.
+    assert.ok(circleLimitFor('local') <= circleLimitFor('verified'));
+  });
+});
+
+describe('the ceiling follows who is paying', () => {
+  // The measured cost of one family is $6.10/week, and every cent of it was
+  // free-tier spend: the companion is free, only the caregiver's reports are
+  // paid. A single ceiling for everyone meant the free tier set the bill.
+
+  test('a paying family is given far more room than a free one', () => {
+    assert.ok(circleLimitFor('pro') > circleLimitFor('verified') * 4);
+  });
+
+  test('Pro gets the old generous ceiling, unchanged', () => {
+    // A paying family meeting a limit is the thing this tier exists to
+    // prevent. If this number ever drops, it should be a decision, not a
+    // side effect of tuning the free one.
+    assert.equal(circleLimitFor('pro'), AI_DAILY_PER_CIRCLE_PRO);
+    assert.ok(AI_DAILY_PER_CIRCLE_PRO >= 600);
+  });
+
+  test('a Pro circle sails past where a free one would have stopped', () => {
+    const r = spend(AI_DAILY_PER_CIRCLE_VERIFIED + 1, 'paying-family', '9.9.9.9', 'pro');
+    assert.equal(r.allowed, true);
+  });
+
+  test('the free ceiling is sized to a day, not to abuse', () => {
+    // ~25 exchanges is fifteen minutes of companion. The ceiling has to clear
+    // that — a short daily visit must finish at full quality — while staying
+    // near enough that a heavy day degrades rather than bills.
+    assert.ok(AI_DAILY_PER_CIRCLE_VERIFIED >= 25, 'a normal daily visit must complete');
+    assert.ok(AI_DAILY_PER_CIRCLE_VERIFIED <= 120, 'or it is not a ceiling at all');
   });
 });
 

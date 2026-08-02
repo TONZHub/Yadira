@@ -15,6 +15,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Send, Loader, Sparkles, Volume2, VolumeX } from 'lucide-react';
+import { PRICE_SHORT } from '../lib/pricing';
 import type { CaregiverCheckIn, HattieMessage } from '../types';
 import { Hattie } from '../components/Hattie';
 import Hearth from './Hearth';
@@ -230,7 +231,7 @@ export const LodgeScreen: React.FC<LodgeScreenProps> = ({
             className="mt-7 inline-flex items-center gap-2 rounded-full bg-[#C8A96A] hover:bg-[#B99855] px-7 py-3.5 font-extrabold text-[#241E18] shadow-lg transition-all active:scale-95 disabled:opacity-60"
           >
             {premiumBusy ? <Loader className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
-            Open the lodge — $5/week
+            Open the lodge — {PRICE_SHORT}
           </button>
           <p className="mt-3 text-xs text-[#9C8F7B]">
             Caregiver Pro. Everything {patientName || 'your loved one'} uses stays free, always.

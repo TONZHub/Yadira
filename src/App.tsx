@@ -42,6 +42,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import type { Message, Memory, CustomFAQ, DailyLog, RoutineItem, PersonaFile, SessionMoment, MoodCheckIn, GalleryPhoto } from './types';
 import { DEFAULT_PROFILE, DEFAULT_PERSONA_FILE } from './types';
 import { useStoreList, useStoreDoc } from './lib/useStore';
+import { PRICE_SHORT, type Plan } from './lib/pricing';
 import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
@@ -704,13 +705,13 @@ function AppContent() {
 
   // "Get Caregiver Pro" → Stripe Checkout. Falls back to the local demo toggle
   // only when the server reports Stripe isn't configured.
-  const startPremiumCheckout = async () => {
+  const startPremiumCheckout = async (plan: Plan = 'monthly') => {
     setPremiumBusy(true);
     try {
       const res = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ circle: getCircleId() }),
+        body: JSON.stringify({ circle: getCircleId(), plan }),
       });
       const data = await res.json();
       if (res.status === 503 && data.error === 'stripe_not_configured') {
@@ -2060,7 +2061,7 @@ function AppContent() {
       const daysLeft = Math.ceil((aiUsage.lastRoutineAt + WEEK_MS - Date.now()) / (24 * 60 * 60 * 1000));
       toastError(
         'Weekly routine used',
-        `The free plan includes one AI routine per week — the next is available in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. Caregiver Pro ($5/week) generates them without limits.`
+        `The free plan includes one AI routine per week — the next is available in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. Caregiver Pro (${PRICE_SHORT}) generates them without limits.`
       );
       return;
     }
@@ -2111,7 +2112,7 @@ function AppContent() {
       const daysLeft = Math.ceil((aiUsage.lastInsightsAt + WEEK_MS - Date.now()) / (24 * 60 * 60 * 1000));
       toastError(
         'Weekly insights used',
-        `The free plan includes one AI insights report per week — the next is available in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. Caregiver Pro ($5/week) has no limits.`
+        `The free plan includes one AI insights report per week — the next is available in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. Caregiver Pro (${PRICE_SHORT}) has no limits.`
       );
       return;
     }
@@ -2156,7 +2157,7 @@ function AppContent() {
     if (!isPremium && used >= CAREGIVER_CHAT_FREE_LIMIT) {
       toastError(
         'Free trial used up',
-        `You've used your ${CAREGIVER_CHAT_FREE_LIMIT} free Ask Yadira messages. Caregiver Pro ($5/week) unlocks unlimited caregiver chat.`
+        `You've used your ${CAREGIVER_CHAT_FREE_LIMIT} free Ask Yadira messages. Caregiver Pro (${PRICE_SHORT}) unlocks unlimited caregiver chat.`
       );
       return;
     }
@@ -2953,7 +2954,7 @@ function AppContent() {
                   </form>
                   {!isPremium && (aiUsage.caregiverChatCount || 0) >= CAREGIVER_CHAT_FREE_LIMIT && (
                     <p className="text-[11px] text-[#7E7D76] mt-2">
-                      You've used your free messages. <span className="font-semibold text-[#3A5D45]">Caregiver Pro ($5/week)</span> unlocks unlimited caregiver chat.
+                      You've used your free messages. <span className="font-semibold text-[#3A5D45]">Caregiver Pro ({PRICE_SHORT})</span> unlocks unlimited caregiver chat.
                     </p>
                   )}
                   <p className="text-[10px] text-[#A6A27B] mt-2">Yadira can be wrong and isn't a doctor — for medical decisions, contact your clinician.</p>
