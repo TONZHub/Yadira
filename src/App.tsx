@@ -1005,6 +1005,25 @@ function AppContent() {
   // caregiver's hub shows a banner within ~1.5s and acknowledges to clear.
   const [caregiverAlert, setCaregiverAlertState] = useState<{ active: boolean; at: number }>({ active: false, at: 0 });
 
+  // The alert's durable copy, in the family's care circle.
+  //
+  // The server keeps this in a Map, which makes the cross-device hand-off fast
+  // and makes it exactly as durable as one process's memory. A redeploy, a
+  // restart, or Render waking from idle drops it — AFTER the patient has been
+  // told someone has been told and is coming. It also does not survive a
+  // second instance: the patient posts to one, the caregiver polls the other.
+  //
+  // So Firestore holds the truth and the server stays the fast path. Newest
+  // timestamp wins, which keeps both directions honest: a restarted server
+  // reporting nothing cannot clear a live alert, and a stale synced doc cannot
+  // resurrect one the caregiver has already acknowledged.
+  const [helpAlertDoc, setHelpAlertDoc] = useStoreDoc<{ active: boolean; at: number }>(
+    'helpAlert',
+    { active: false, at: 0 }
+  );
+  const helpAlertDocRef = useRef(helpAlertDoc);
+  helpAlertDocRef.current = helpAlertDoc;
+
   // Vivid invite flow — tracks how many times each name is mentioned by the
   // patient within the current session (resets on new session / family switch).
   // When a name crosses VIVID_INVITE_THRESHOLD, a warm banner invites the
@@ -1016,6 +1035,9 @@ function AppContent() {
     const state = { active, at: Date.now() };
     setCaregiverAlertState(state);
     localStorage.setItem('yadira_caregiver_alert', JSON.stringify(state));
+    // The durable copy. Written first so a request that never lands still
+    // reaches the caregiver's device through the circle.
+    setHelpAlertDoc(state);
     fetch('/api/caregiver-alert', {
       method: 'POST',
       headers: authHeaders(),
@@ -1034,6 +1056,14 @@ function AppContent() {
       }),
     }).catch((err) => console.warn('[Yadira] caregiver-alert push failed', err));
   };
+
+  // The circle's copy arriving from Firestore, when it is newer than what we
+  // are showing. The poll above merges on its own tick, but that only runs
+  // when the server answers — this is the path that still works when the
+  // server is the thing that is down.
+  useEffect(() => {
+    setCaregiverAlertState((prev) => (helpAlertDoc.at > prev.at ? helpAlertDoc : prev));
+  }, [helpAlertDoc.active, helpAlertDoc.at]);
 
   // ---- Terminal lucidity alert ----
   // Raised when the chat endpoint detects a window of real clarity in the
@@ -1080,12 +1110,16 @@ function AppContent() {
         if (helpRes.ok) {
           const data = await helpRes.json();
           if (typeof data?.active === 'boolean') {
+            // Server vs. the circle's durable copy — newest wins. A server that
+            // has just restarted answers {active:false, at:0}, which must not
+            // be allowed to silence an alert Firestore still knows about.
+            const fromServer = { active: data.active as boolean, at: (data.at as number) || 0 };
+            const stored = helpAlertDocRef.current;
+            const winner = stored.at > fromServer.at ? stored : fromServer;
             // Bail out when nothing changed — a fresh object every poll tick
             // re-renders the whole app every 1.5s for no reason.
             setCaregiverAlertState((prev) =>
-              prev.active === data.active && prev.at === (data.at || 0)
-                ? prev
-                : { active: data.active, at: data.at || 0 }
+              prev.active === winner.active && prev.at === winner.at ? prev : winner
             );
           }
         }

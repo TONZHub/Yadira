@@ -11,6 +11,8 @@ import {
   buildTestCallGoal,
   withinCooldown,
   markCalled,
+  clearCooldown,
+  cooldownRemaining,
   __resetCooldowns,
   HELP_RESULT_SCHEMA,
   type HelpCallRequest,
@@ -140,6 +142,39 @@ describe('repeat presses do not mean repeat calls', () => {
     const now = Date.now();
     markCalled('circle-a', now);
     assert.equal(withinCooldown('circle-b', now + 1_000), false);
+  });
+
+  test('a call that never happened does not hold the cooldown', () => {
+    // The cooldown is claimed BEFORE dialling, so a second press arriving
+    // while the first is still connecting cannot ring the caregiver twice.
+    // When the call then fails outright — bad number, CALL-E unreachable, no
+    // key — holding it would answer the next ten minutes of presses with
+    // "Already called you recently, so this press did not ring again". That
+    // sentence would be false, on the one feature that must never be.
+    __resetCooldowns();
+    const now = Date.now();
+    markCalled('circle-a', now);
+    assert.equal(withinCooldown('circle-a', now + 1_000), true);
+
+    clearCooldown('circle-a'); // what the failure path now does
+
+    assert.equal(withinCooldown('circle-a', now + 1_000), false, 'the next press must be able to ring');
+    assert.equal(cooldownRemaining('circle-a', now + 1_000), 0);
+  });
+
+  test('clearing one family’s cooldown leaves another’s alone', () => {
+    __resetCooldowns();
+    const now = Date.now();
+    markCalled('circle-a', now);
+    markCalled('circle-b', now);
+    clearCooldown('circle-a');
+    assert.equal(withinCooldown('circle-b', now + 1_000), true);
+  });
+
+  test('clearing a circle that was never called is harmless', () => {
+    __resetCooldowns();
+    clearCooldown('never-called');
+    assert.equal(withinCooldown('never-called'), false);
   });
 });
 
