@@ -18,8 +18,12 @@ export interface TodayTabProps {
   faqs: CustomFAQ[];
   patientName: string;
   todaysCheckIn: MoodCheckIn | null | undefined;
-  moodLabel: Record<string, string> | ((mood: string) => string);
-  aiInsights: string;
+  moodLabel: (m: DailyLog['mood']) => string;
+  aiInsights: {
+    clinicalSummary: string;
+    criticalAlerts: string[];
+    actionableTips: string[];
+  } | null;
   loadingInsights: boolean;
   handleGenerateInsights: () => void;
   handleAddLog: (e: React.FormEvent) => void;

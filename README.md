@@ -213,7 +213,7 @@ mode; with no Firebase config it runs entirely on localStorage.
 ```bash
 npm run build             # client + bundled server
 npm start                 # serve on PORT (default 3000)
-npm run lint              # tsc --noEmit
+npm run lint              # tsc --noEmit (React types now installed — see below)
 npm test                  # 241 tests, node:test
 ```
 

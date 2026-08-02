@@ -24,20 +24,22 @@ export interface MemoriesTabProps {
   setShowMemModal: (open: boolean) => void;
   patientName: string;
   representedPersona: string;
-  handleSendRedirection: () => void;
-  handleStartFreshSession: () => void;
+  handleSendRedirection: (nurseNote: string) => void | Promise<void>;
+  handleStartFreshSession: () => void | Promise<void>;
   personaFile: PersonaFile;
   setPersonaFile: (next: PersonaFile) => void;
   galleryPhotos: GalleryPhoto[];
-  setGalleryPhotos: (next: GalleryPhoto[]) => void;
+  // useStoreList's updater — the functional form is what this file uses.
+  setGalleryPhotos: (next: GalleryPhoto[] | ((prev: GalleryPhoto[]) => GalleryPhoto[])) => void;
   addPhotoToGallery: (dataUrl: string, insight: any, addedBy: 'patient' | 'caregiver') => void;
   editingPhotoId: string | null;
   setEditingPhotoId: (id: string | null) => void;
   editingCaption: string;
   setEditingCaption: (caption: string) => void;
-  saveCaption: (id: string) => void;
-  getThemeGradient: (theme: Memory['imageTheme']) => string;
-  playSoundCue: (cue: string) => void;
+  /** Reads the id it needs from editingPhotoId — takes nothing. */
+  saveCaption: () => void;
+  getThemeGradient: (theme: string) => string;
+  playSoundCue: (type: 'chime' | 'pop') => void;
   toastSuccess: (title: string, message?: string) => void;
 }
 

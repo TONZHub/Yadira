@@ -15,6 +15,7 @@ import {
   Volume2, VolumeX,
 } from 'lucide-react';
 import type { Message, Memory, CustomFAQ, RoutineItem } from '../types';
+import type { SoundscapeTheme, SoundscapeHandle } from '../lib/soundscapes';
 import { VoiceInput } from './VoiceInput';
 import { MediaUpload } from './MediaUpload';
 import { EmotionBadge } from './EmotionBadge';
@@ -51,9 +52,9 @@ export interface PatientViewProps {
   speakText: (text: string) => void;
   speakTextDirect: (text: string) => void;
   stopSpeaking: () => void;
-  playSoundCue: (cue: string) => void;
-  playMemorySoundscape: (memory: Memory) => void;
-  getThemeGradient: (theme: Memory['imageTheme']) => string;
+  playSoundCue: (type: 'chime' | 'pop') => void;
+  playMemorySoundscape: (theme: SoundscapeTheme) => SoundscapeHandle | null;
+  getThemeGradient: (theme: string) => string;
   toggleRoutine: (id: string) => void;
   setIsCallActive: (b: boolean) => void;
   setIsAlbumOpen: (b: boolean) => void;

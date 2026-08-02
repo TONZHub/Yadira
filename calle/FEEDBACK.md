@@ -10,8 +10,27 @@ Ordered by how much it affected the product.
 
 ## 1. An unknown caller ID is the biggest practical problem
 
-**Measured:** the call arrived from `+1 214-295-5547 (Texas)` — a number the
-caregiver has never seen, at 04:06.
+**Measured, across three consecutive calls to the same caregiver:**
+
+| Call | Caller ID | Area |
+| --- | --- | --- |
+| 1 | `+1 214-295-5547` | Dallas, TX |
+| 2 | `+1 832-590-3283` | Houston, TX |
+| 3 | `+1 504-433-7012` | New Orleans, LA |
+
+Three calls, three numbers, three cities — none of them the caregiver's own
+area code. **The caller ID is not stable across calls**, which is worse than it
+being merely unfamiliar, and it is the single finding from this integration
+that changed our product copy.
+
+We had shipped a "send me a test call" feature whose stated purpose was so the
+caregiver could *save the number as a contact* before the night they need it.
+That advice was in the UI twice and in the test call's own script. It could
+never have worked — and worse, a caregiver who followed it would have believed
+they were protected while nothing had changed. All of it has been replaced with
+the only advice that survives a rotating caller ID: turn off your phone's
+"silence unknown callers" setting, because you cannot allowlist what you cannot
+predict.
 
 This is the one call in the product that must not be missed, and it arrives
 looking exactly like the 4am spam call people are trained to decline. Many
@@ -19,7 +38,8 @@ phones now silence unknown numbers by default. Do Not Disturb rules routinely
 allow contacts only.
 
 The mitigations available to us are all bad: we cannot tell the caregiver which
-number to save, because we do not know it in advance and it may differ per call.
+number to save, because we do not know it in advance and — now measured — it
+differs on every call.
 
 **What would help, roughly in order of usefulness:**
 
