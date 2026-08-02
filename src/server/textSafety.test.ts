@@ -9,10 +9,75 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   cleanModelOutput,
+  stripReasoningBlocks,
   breaksCharacter,
   trimToSentences,
   escapeRegExp,
 } from './textSafety';
+
+describe('the reasoning scratchpad never reaches the patient', () => {
+  // Reported from call mode: the screen showed a bare "</think>", and the
+  // speech synthesiser said it out loud. The chat model is a reasoning model
+  // and its private planning was arriving as the companion's voice.
+
+  test('the reported failure: a bare orphan closing tag', () => {
+    // The opening tag was consumed upstream, so only the close survived.
+    assert.equal(
+      cleanModelOutput('</think>Hello, dear. The roses are lovely today.'),
+      'Hello, dear. The roses are lovely today.'
+    );
+  });
+
+  test('a whole block, opening tag and all', () => {
+    const raw = '<think>The user seems anxious. I should validate, not correct.</think>You are safe here with me.';
+    assert.equal(cleanModelOutput(raw), 'You are safe here with me.');
+  });
+
+  test('scratchpad that was never opened is still scratchpad', () => {
+    // The commonest real shape: reasoning text, then the close, then the line.
+    const raw = 'They asked about Edward. Validate the feeling.</think>Edward loved you very much, sweetheart.';
+    assert.equal(cleanModelOutput(raw), 'Edward loved you very much, sweetheart.');
+  });
+
+  test('an unterminated block yields nothing rather than a leaked thought', () => {
+    // The token budget ran out mid-thought. There is no reply in here — only
+    // planning — and handing back the "original" would be handing back that.
+    assert.equal(cleanModelOutput('<think>The patient is asking about their mother, who died in'), '');
+  });
+
+  test('a reply that is ONLY reasoning comes back empty, and that is correct', () => {
+    // The caller reads this as "fall back", which reaches getSimulationReply —
+    // a reply that at least reads what the patient actually said.
+    assert.equal(cleanModelOutput('<think>I should ask an open question.</think>'), '');
+  });
+
+  test('both delimiter styles, including the ◁think▷ variant', () => {
+    assert.equal(stripReasoningBlocks('◁think▷planning◁/think▷I am right here.'), 'I am right here.');
+    assert.equal(stripReasoningBlocks('<thinking>planning</thinking>I am right here.'), 'I am right here.');
+    assert.equal(stripReasoningBlocks('<reasoning>planning</reasoning>I am right here.'), 'I am right here.');
+  });
+
+  test('several blocks, and the words between them survive joined', () => {
+    const raw = '<think>a</think>Good morning.<think>b</think>Did you sleep well?';
+    assert.equal(stripReasoningBlocks(raw), 'Good morning. Did you sleep well?');
+  });
+
+  test('the word "think" in an ordinary sentence is untouched', () => {
+    // The filter keys on tags, not on the verb. This is the false positive
+    // that would matter, because it is a thing people say constantly.
+    const kept = [
+      'I think the garden is at its best in June.',
+      "Do you think we should call your daughter, dear?",
+      "I was thinking of you this morning.",
+    ];
+    for (const line of kept) assert.equal(cleanModelOutput(line), line);
+  });
+
+  test('a reply with no tags at all is passed straight through', () => {
+    const line = 'The lake house had that green door you painted.';
+    assert.equal(stripReasoningBlocks(line), line);
+  });
+});
 
 describe('cleanModelOutput — replies the companion must never lose', () => {
   // Each of these was destroyed by the previous bare-verb filter.

@@ -513,6 +513,15 @@ async function openRouterChat(
   const content = data.choices?.[0]?.message?.content;
   const cleaned = cleanModelOutput(content || '');
 
+  // The model spent the whole reply thinking and never got to the words —
+  // either it ran out of budget mid-scratchpad, or the entire response was
+  // one reasoning block. cleanModelOutput strips that to nothing on purpose.
+  // Routing to the simulation fallback gets a reply that reads the patient's
+  // actual message, which is better than the flat generic line.
+  if (content && !cleaned) {
+    throw new Error('Model returned only reasoning scratchpad — routing to simulation fallback.');
+  }
+
   // Detect content-safety classifier responses (e.g. "safe", "unsafe", "User Safety: safe").
   // These come from nvidia/nemotron-3.5-content-safety which openrouter/free sometimes routes to.
   const lowerCleaned = cleaned.toLowerCase().trim();
