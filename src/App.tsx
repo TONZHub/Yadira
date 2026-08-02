@@ -4467,6 +4467,9 @@ function AppContent() {
                         toastSuccess('Photo added', 'It is now in the family album. Tap its caption to reword it.');
                       }
                     }}
+                    // The caregiver is the only person who can fix a bad
+                    // model name, so they are the one who gets told what broke.
+                    showTechnicalErrors
                     isPremium={true}
                   />
                 </div>
