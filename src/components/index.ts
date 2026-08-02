@@ -19,3 +19,4 @@ export { default as PhotoAlbum } from './PhotoAlbum';
 export { default as Campfire } from './Campfire';
 export { default as CloneVoiceModal } from './CloneVoiceModal';
 
+export { default as CaregiverTour, tourSeenKey } from './CaregiverTour';

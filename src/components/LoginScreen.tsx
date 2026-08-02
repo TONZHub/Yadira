@@ -385,7 +385,7 @@ export const LoginScreen: React.FC = () => {
             {!isSignup && (
               <div className="mt-6 p-3 bg-[#F2FAF4] border border-[#CEDFCF] rounded-lg">
                 <p className="text-xs text-[#3A5D45]">
-                  <span className="font-semibold">New here?</span> Tap <span className="font-semibold">Sign Up</span> to create your own account — it comes with a fully populated sample family to explore. Or use <span className="font-semibold">Try the companion</span> for a one-tap look, on this device only.
+                  <span className="font-semibold">New here?</span> Tap <span className="font-semibold">Sign Up</span> and you'll be asked whether to explore a sample family or set up the person you care for. Or use <span className="font-semibold">Try the companion</span> for a one-tap look, on this device only.
                 </p>
               </div>
             )}

@@ -45,7 +45,7 @@ import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
 import { CALLE_REGIONS } from './server/calleRegions';
-import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal } from './components';
+import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal, CaregiverTour, tourSeenKey } from './components';
 import type { FamilyPackApply } from './components';
 import type { RoomId } from './lib/sensoryRooms';
 import { AuthProvider, useAuth } from './lib/AuthContext';
@@ -156,6 +156,11 @@ function AppContent() {
   const helpReachesCaregiver = !isUnlinkedPatient;
   const { error: toastError, success: toastSuccess } = useToast();
   const [demoSeeded, setDemoSeeded] = useState(false);
+  // First run for a caregiver: the Family Setup modal, opened as a question
+  // rather than reached from a menu. Distinct from showFamilySetup so the
+  // first-run copy and the skip-the-confirm behaviour only apply here.
+  const [firstRunSetup, setFirstRunSetup] = useState(false);
+  const [showTour, setShowTour] = useState(false);
 
   // Auth headers for API requests that must fail *silently* (drift, reflection)
   // — apiCall below raises a toast on failure, which is wrong for background
@@ -493,27 +498,47 @@ function AppContent() {
   const personaFileRef = useRef(personaFile);
   personaFileRef.current = personaFile;
 
-  // Seed demo data on first login
+  // What a brand-new circle starts with.
+  // ------------------------------------------------------------------
+  // This used to seed Eleanor's family silently on first login, and that had a
+  // sharp edge on the caregiver side: `logs` goes straight to
+  // /api/insights/summarize and to Ask Yadira, which the app describes as
+  // "grounded in the patient's own records". So a real caregiver could, on day
+  // one, generate a clinical insight report about a fictional woman's sleep
+  // and confusion — indistinguishable from a real one about their own mother.
+  // For a product whose own rule is that a fabricated wellbeing signal gets
+  // charted and acted on, that is the wrong default.
+  //
+  // A caregiver is now ASKED, using the Family Setup modal that already
+  // existed: a sample family to explore, or their own from scratch. Both paths
+  // already worked; only the moment of choosing is new.
+  //
+  // A patient/demo session still seeds silently, because there is nobody there
+  // to ask and a companion with no memories is not a demo of anything. That is
+  // the "Try the companion" path, which is a demo by name.
   useEffect(() => {
-    if (user && !demoSeeded) {
-      // Per-circle flag: each new family gets the sample content once, and a
-      // second account on the same browser doesn't inherit the first's flag.
-      const seededKey = `yadira_${getCircleId()}_seeded_demo`;
-      const isFirstLogin = localStorage.getItem(seededKey) !== 'true';
-      if (isFirstLogin) {
-        setMemories(DEMO_MEMORIES);
-        setFaqs(DEMO_FAQS);
-        setLogs(DEMO_LOGS);
-        setRoutine(DEMO_ROUTINE);
-        localStorage.setItem(seededKey, 'true');
-        setDemoSeeded(true);
-        if (sessionRole === 'patient') {
-          toastSuccess('Welcome back', `${patientName || 'Eleanor'}, you are safe and supported.`);
-        } else {
-          toastSuccess('Welcome, Thomas!', `${patientName || 'Eleanor'}'s profile is loaded and ready`);
-        }
-      }
+    if (!user || demoSeeded) return;
+    // Per-circle flag: each new family gets this once, and a second account on
+    // the same browser doesn't inherit the first's flag.
+    const seededKey = `yadira_${getCircleId()}_seeded_demo`;
+    if (localStorage.getItem(seededKey) === 'true') return;
+
+    if (sessionRole === 'patient') {
+      setMemories(DEMO_MEMORIES);
+      setFaqs(DEMO_FAQS);
+      setLogs(DEMO_LOGS);
+      setRoutine(DEMO_ROUTINE);
+      localStorage.setItem(seededKey, 'true');
+      setDemoSeeded(true);
+      toastSuccess('Welcome back', `${patientName || 'Eleanor'}, you are safe and supported.`);
+      return;
     }
+
+    // Caregiver: ask rather than assume. Marked handled immediately so the
+    // effect doesn't reopen the modal on every re-render; the flag is written
+    // when they choose (or when they close, meaning "start empty").
+    setDemoSeeded(true);
+    setFirstRunSetup(true);
   }, [user, demoSeeded, sessionRole, patientName]);
 
   useEffect(() => {
@@ -1499,7 +1524,14 @@ function AppContent() {
     // family replaces the profile, memories, FAQs, logs, and routine. A real
     // incident (a stray zoom gesture) once wiped a family's data; this
     // confirm plus Care Lock makes that path unrepeatable.
-    if (!window.confirm(`Load "${label}" into this care circle? This REPLACES the current profile, memories, FAQs, logs, and routine.`)) {
+    //
+    // Skipped on first run, where there is nothing to destroy: warning someone
+    // that their empty circle is about to be REPLACED, seconds after asking
+    // them to choose, reads as a threat rather than a safeguard.
+    if (
+      !firstRunSetup &&
+      !window.confirm(`Load "${label}" into this care circle? This REPLACES the current profile, memories, FAQs, logs, and routine.`)
+    ) {
       return;
     }
     setProfile(pack.profile);
@@ -1537,6 +1569,27 @@ function AppContent() {
 
     setShowFamilySetup(false);
     toastSuccess('Care circle ready', `${label} is loaded and ready.`);
+
+    // Straight from choosing into the walkthrough, once, for a caregiver who
+    // has just arrived. Anyone who returns to Family Setup later has already
+    // seen it and does not need it again.
+    if (firstRunSetup) {
+      setFirstRunSetup(false);
+      if (localStorage.getItem(tourSeenKey(getCircleId())) !== 'true') setShowTour(true);
+    }
+  };
+
+  /** The walkthrough is dismissed for good once seen — reopenable from the header. */
+  const closeTour = () => {
+    setShowTour(false);
+    try { localStorage.setItem(tourSeenKey(getCircleId()), 'true'); } catch { /* non-fatal */ }
+  };
+
+  /** Closing first-run setup without choosing means "start with nothing". */
+  const skipFirstRunSetup = () => {
+    setFirstRunSetup(false);
+    localStorage.setItem(`yadira_${getCircleId()}_seeded_demo`, 'true');
+    if (localStorage.getItem(tourSeenKey(getCircleId())) !== 'true') setShowTour(true);
   };
 
   // Stop whatever Yadira is saying, right now. Bumping the speak generation
@@ -2284,6 +2337,20 @@ function AppContent() {
             </button>
           )}
 
+          {/* Reopen the walkthrough. Hidden on the patient's screen and under
+              Care Lock, like every other caregiver control up here. */}
+          {!isPatientSession && !careLocked && (
+            <button
+              id="btn-tour"
+              onClick={() => setShowTour(true)}
+              className="p-2 sm:p-2.5 rounded-xl border border-[#E3DFC2] bg-white text-[#A6A27B] hover:text-[#3A5D45] hover:border-[#CEDFCF] transition-all"
+              title="How Yadira works — the caregiver walkthrough"
+              aria-label="Open the caregiver walkthrough"
+            >
+              <HelpCircle className="w-5 h-5" />
+            </button>
+          )}
+
           {/* Care Lock — tap to lock this device to the patient view; press
               and hold 3s to unlock. A confused zoom gesture can't do either
               by accident. */}
@@ -2351,6 +2418,25 @@ function AppContent() {
           isPremium={true}
           onSelect={openRoom}
           onClose={() => setShowRoomsMenu(false)}
+        />
+      )}
+
+      {/* First-run care circle, and the caregiver's walkthrough.
+          BOTH are gated on this not being the patient's screen. A modal that
+          interrupts, demands a sequence and hands out instructions is the
+          opposite of what the companion side is for — and under Care Lock the
+          device IS the patient's, whatever the session role underneath says. */}
+      {!isPatientSession && !careLocked && firstRunSetup && (
+        <FamilySetup firstRun onClose={skipFirstRunSetup} onApply={applyFamilyPack} />
+      )}
+      {!isPatientSession && !careLocked && showTour && (
+        <CaregiverTour
+          patientName={patientName}
+          onClose={closeTour}
+          onOpenSettings={() => {
+            setActiveTab('caregiver');
+            setCaregiverTab('settings');
+          }}
         />
       )}
 
