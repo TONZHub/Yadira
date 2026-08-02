@@ -3551,8 +3551,8 @@ function AppContent() {
                       controls disappear so a stray touch cannot reach them.
                       <span className="block mt-1">
                         <b>Do not log out first.</b> Logging out is what disconnects the device — after it,
-                        tapping <b>I'm a Patient</b> starts a demo that looks identical and whose help button
-                        never reaches you.
+                        the patient button becomes <b>Try the companion</b> — a demo whose help button never
+                        reaches you.
                       </span>
                     </div>
                     {helpCallStatus && (

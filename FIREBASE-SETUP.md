@@ -112,8 +112,8 @@ reachable by a stray touch, and goes full screen — all while the caregiver's
 account stays on the device, which is the part that matters here.
 
 **Logging out is what breaks the link**, and it does not look like it. Once
-the account is gone, "I'm a Patient" mints a local session in a circle of its
-own. It looks identical, but the help button raises an alert the caregiver
+the account is gone the patient button becomes "Try the companion", which mints
+a local session in a circle of its own — the help button raises an alert the caregiver
 never receives, the escalation number saved on the caregiver's device is not
 there, and the circle is on nobody's subscription — so the CALL-E call has
 neither a number to ring nor a Pro entitlement to ring it with. This is why

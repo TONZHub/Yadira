@@ -39,7 +39,7 @@ fades to the login card. Let it play in full; it's your brand moment.
 
 ## 2. "What does my mom actually see?" — *~90s*
 
-**On screen:** tap "I'm a Patient." Camp opens: Hattie, the campfire
+**On screen:** tap "I'm a Patient" (the tablet is signed in, so that is what it says). Camp opens: Hattie, the campfire
 crackling at day 7, the mood buttons.
 
 **Narration:**

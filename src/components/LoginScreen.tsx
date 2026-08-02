@@ -201,11 +201,18 @@ export const LoginScreen: React.FC = () => {
               <div className="flex items-center gap-3">
                 <UserRound className="w-6 h-6 text-[#5C8D71]" />
                 <div>
-                  <p className="font-bold">I'm a Patient</p>
+                  {/* The same tap does two genuinely different things, and
+                      until now they looked identical. With an account on the
+                      device it resumes the real thing; without one it is a
+                      demo that reaches nobody. Both are worth having — the
+                      first is how a handed-over tablet gets back in after a
+                      restart, the second is how anyone tries the companion —
+                      so they are labelled apart rather than one removed. */}
+                  <p className="font-bold">{deviceHasAccount ? 'I\'m a Patient' : 'Try the companion'}</p>
                   <p className="text-xs text-[#7E7D76]">
                     {deviceHasAccount
                       ? 'Connected to your care circle — one tap, no password'
-                      : 'Start with one tap, no password'}
+                      : 'A demo, on this device only — not connected to a caregiver'}
                   </p>
                 </div>
               </div>
@@ -378,7 +385,7 @@ export const LoginScreen: React.FC = () => {
             {!isSignup && (
               <div className="mt-6 p-3 bg-[#F2FAF4] border border-[#CEDFCF] rounded-lg">
                 <p className="text-xs text-[#3A5D45]">
-                  <span className="font-semibold">New here?</span> Tap <span className="font-semibold">Sign Up</span> to create your own account — it comes with a fully populated sample family to explore. Or use <span className="font-semibold">I'm a Patient</span> for a one-tap look at the companion.
+                  <span className="font-semibold">New here?</span> Tap <span className="font-semibold">Sign Up</span> to create your own account — it comes with a fully populated sample family to explore. Or use <span className="font-semibold">Try the companion</span> for a one-tap look, on this device only.
                 </p>
               </div>
             )}

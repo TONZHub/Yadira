@@ -126,7 +126,7 @@ for them and when, and never rings twice for repeated presses. Full design in
 sign in with the caregiver's account and then press the padlock — **Care
 Lock** — to hand it over. *Do not log out.* The circle id is the account's
 uid, so the account staying on the device is the only thing putting it in the
-family's circle; log out and "I'm a Patient" starts a session of its own where
+family's circle; log out and the patient button becomes a demo in a circle of its own, where
 the alert reaches nobody and there is no number to ring. The app warns on the
 role screen, in the caregiver's help-call card, and in the logout confirmation
 itself — and an unlinked device never tells the patient that someone has been
