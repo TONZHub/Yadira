@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import TermsModal, { TERMS_VERSION } from './TermsModal';
 import { useLargeFont } from '../lib/fontScale';
 import EvergreenBackdrop from './EvergreenBackdrop';
+import { readDeviceAccount } from '../lib/localSession';
 
 // The logo draw-in finishes around 2.5s and holds; the frame blanks near
 // 5.5s. Fade the intro out just before the blank so the wordmark never
@@ -35,12 +36,18 @@ export const LoginScreen: React.FC = () => {
     const t = window.setTimeout(finishIntro, INTRO_MS);
     return () => window.clearTimeout(t);
   }, [showIntro]);
-  // Is there an account on this device for patient mode to inherit? If not,
-  // "I'm a Patient" starts a session in a circle of its own — fine for a look
-  // around, wrong for the patient's real tablet, where it would leave the help
-  // button raising alerts nobody receives. Said plainly below rather than left
-  // to be discovered on the night it matters.
-  const deviceHasAccount = typeof window !== 'undefined' && !!localStorage.getItem('yadira_token');
+  // Is there a REAL account on this device for patient mode to inherit?
+  //
+  // "Is there a token?" was the wrong question. The demo button mints one, so
+  // a single tap made this screen claim "Connected to your care circle" for
+  // ever after, on a device connected to nothing — the precise false
+  // reassurance it was added to prevent. readDeviceAccount tells a real
+  // account from a demo's leftovers.
+  const account =
+    typeof window === 'undefined'
+      ? ({ state: 'none' } as const)
+      : readDeviceAccount(localStorage.getItem('yadira_token'), localStorage.getItem('yadira_user_id'));
+  const deviceHasAccount = account.state === 'linked';
   const [screen, setScreen] = useState<'role' | 'caregiver'>('role');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -214,6 +221,14 @@ export const LoginScreen: React.FC = () => {
                       ? 'Connected to your care circle — one tap, no password'
                       : 'A demo, on this device only — not connected to a caregiver'}
                   </p>
+                  {/* Name the account. A claim you can check beats a claim you
+                      have to trust — and if this is not the caregiver's email,
+                      the device is not set up the way they think it is. */}
+                  {deviceHasAccount && account.state === 'linked' && account.email && (
+                    <p className="text-[11px] text-[#8A8981] mt-0.5 break-all">
+                      Signed in as <span className="font-semibold">{account.email}</span>
+                    </p>
+                  )}
                 </div>
               </div>
             </button>

@@ -25,7 +25,7 @@ class MemoryStorage {
 const storage = new MemoryStorage();
 (globalThis as any).localStorage = storage;
 
-const { localUid, isLocalCircle, isUnlinkedPatientCircle, LOCAL_UID_PREFIX, UNLINKED_PATIENT_EMAIL } =
+const { localUid, isLocalCircle, isUnlinkedPatientCircle, readDeviceAccount, LOCAL_UID_PREFIX, UNLINKED_PATIENT_EMAIL } =
   await import('./localSession');
 
 beforeEach(() => storage.clear());
@@ -118,5 +118,60 @@ describe('localUid', () => {
 
   test('survives an email with nothing usable in it', () => {
     assert.ok(localUid('@@@').startsWith(`${LOCAL_UID_PREFIX}user`));
+  });
+});
+
+describe('readDeviceAccount — the role screen must not claim a connection it lacks', () => {
+  // Reported from a phone: the screen said "I'm a Patient — Connected to your
+  // care circle" on a device that was connected to nothing. The check behind
+  // it asked only "is there a token?" — and the demo button MINTS a token. So
+  // one tap of "Try the companion" made the device claim to be linked for
+  // ever after, and the claim got more convincing the longer it sat there.
+  //
+  // atob exists in node 22; these tokens are unsigned, which is fine because
+  // this reads identity for display, never for authorisation.
+  const jwt = (payload: Record<string, unknown>) =>
+    `header.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.sig`;
+
+  test('a demo session\'s leftovers are NOT a connection', () => {
+    const uid = localUid(UNLINKED_PATIENT_EMAIL);
+    const token = jwt({ uid, email: UNLINKED_PATIENT_EMAIL });
+    assert.deepEqual(readDeviceAccount(token, uid), { state: 'demo' });
+  });
+
+  test('the legacy suffix-free demo uid is caught too', () => {
+    const uid = 'local-patientyadiralocal';
+    assert.deepEqual(readDeviceAccount(jwt({ uid }), uid), { state: 'demo' });
+  });
+
+  test('a real Firebase account is linked, and names itself', () => {
+    const uid = 'A1b2C3d4E5f6G7h8I9j0K1l2M3n4';
+    const account = readDeviceAccount(jwt({ uid, email: 'ruth@example.com' }), uid);
+    assert.deepEqual(account, { state: 'linked', email: 'ruth@example.com' });
+  });
+
+  test('a caregiver on a Firebase-less build is linked as well', () => {
+    // Their circle is local, but it is THEIR circle — the patient device
+    // inheriting it really does reach them.
+    const uid = localUid('carer@example.com');
+    const account = readDeviceAccount(jwt({ uid, email: 'carer@example.com' }), uid);
+    assert.equal(account.state, 'linked');
+  });
+
+  test('no token is no account', () => {
+    assert.deepEqual(readDeviceAccount(null, null), { state: 'none' });
+    assert.deepEqual(readDeviceAccount('', 'local-carer'), { state: 'none' });
+  });
+
+  test('a token with no identity in it is not treated as an account', () => {
+    assert.deepEqual(readDeviceAccount(jwt({ iat: 1 }), null), { state: 'none' });
+    assert.deepEqual(readDeviceAccount('not-a-jwt', null), { state: 'none' });
+  });
+
+  test('the stored uid wins over the token payload', () => {
+    // The uid in localStorage is what getCircleId() actually uses, so it is
+    // the one that decides whether this device is in anybody's circle.
+    const account = readDeviceAccount(jwt({ uid: 'A1b2C3d4E5f6G7h8I9j0' }), localUid(UNLINKED_PATIENT_EMAIL));
+    assert.equal(account.state, 'demo');
   });
 });
