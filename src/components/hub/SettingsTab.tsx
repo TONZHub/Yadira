@@ -43,7 +43,12 @@ export interface SettingsTabProps {
   sendTestCall: () => void;
   testingCall: boolean;
   isPremium: boolean;
-  premium: { unlocked: boolean; currentPeriodEnd?: number };
+  premium: {
+    unlocked: boolean;
+    subscriptionId?: string;
+    customerId?: string;
+    currentPeriodEnd?: number;
+  };
   premiumBusy: boolean;
   startPremiumCheckout: () => void;
   openBillingPortal: () => void;
