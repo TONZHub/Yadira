@@ -16,6 +16,8 @@ interface AuthContextType {
   signup: (email: string, password: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
   enterPatientMode: () => void;
+  /** Return to the role screen WITHOUT signing out — see below. */
+  handOverDevice: () => void;
   logout: () => Promise<void>;
 }
 
@@ -318,6 +320,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSessionRole('patient');
   };
 
+  /**
+   * Back to the role screen, still signed in.
+   *
+   * Until now the only way to reach that screen was to log out — which
+   * removes the account, and the account is the only thing putting a device
+   * in the family's circle. So the screen's own "Connected to your care
+   * circle" state was unreachable on purpose: you could only land on it by
+   * accident, by closing the tab and reopening. A caregiver following the
+   * obvious path instead destroyed the connection on the way to using it.
+   *
+   * This clears the session's ROLE, not the identity. localStorage keeps the
+   * token and uid; only the sessionStorage marker goes, which is exactly what
+   * a fresh visit does. The patient button then reads "Connected to your care
+   * circle" and means it.
+   */
+  const handOverDevice = () => {
+    sessionStorage.removeItem('yadira_session_role');
+    setSessionRole('caregiver');
+    setUser(null);
+    setToken(null);
+    setError(null);
+  };
+
   const logout = async () => {
     setLoading(true);
     try {
@@ -339,7 +364,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, sessionRole, isUnlinkedPatient: isUnlinkedPatientCircle(user?.uid), loading, error, login, signup, loginWithGoogle, enterPatientMode, logout }}>
+    <AuthContext.Provider value={{ user, token, sessionRole, isUnlinkedPatient: isUnlinkedPatientCircle(user?.uid), loading, error, login, signup, loginWithGoogle, enterPatientMode, handOverDevice, logout }}>
       {children}
     </AuthContext.Provider>
   );

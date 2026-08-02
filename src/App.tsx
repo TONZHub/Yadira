@@ -26,6 +26,7 @@ import {
   HeartHandshake,
   Music2,
   LogOut,
+  UserRoundCheck,
   Phone,
   PhoneOff,
   Tent,
@@ -146,7 +147,7 @@ const DEFAULT_ROUTINE: RoutineItem[] = [
 ];
 
 function AppContent() {
-  const { user, sessionRole, isUnlinkedPatient, logout } = useAuth();
+  const { user, sessionRole, isUnlinkedPatient, handOverDevice, logout } = useAuth();
   const isPatientSession = sessionRole === 'patient';
   // A patient session that never joined a care circle sits in one of its own:
   // the caregiver never receives what it raises, it holds no escalation
@@ -2383,6 +2384,31 @@ function AppContent() {
             {careLocked ? <Lock className="w-5 h-5" /> : <Unlock className="w-5 h-5" />}
           </button>
 
+          {/* Hand over — back to the role screen, still signed in.
+              Sits immediately beside Log out because that is the button
+              caregivers were reaching for: the only route to the role screen
+              used to be signing out, which removes the account and so breaks
+              the very connection they were trying to hand over. */}
+          {!isPatientSession && !careLocked && (
+            <button
+              id="btn-hand-over"
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Hand this device to ${patientName || 'them'}?\n\nYou stay signed in — this only returns to the choose-your-role screen, where they can tap "I'm a Patient".\n\nFor their own tablet, the padlock (Care Lock) is better: it hides the caregiver controls entirely.`
+                  )
+                ) {
+                  handOverDevice();
+                }
+              }}
+              className="p-2 sm:p-2.5 rounded-xl border border-[#E3DFC2] bg-white text-[#A6A27B] hover:text-[#3A5D45] hover:border-[#CEDFCF] transition-all"
+              title="Hand this device over — back to the role screen, still signed in"
+              aria-label="Hand this device over, staying signed in"
+            >
+              <UserRoundCheck className="w-5 h-5" />
+            </button>
+          )}
+
           {/* Log out — returns to the role-selection/login screen. Confirmed
               first so a patient can't accidentally end their own session.
               Hidden under Care Lock: ending the session IS destructive. */}
@@ -3634,7 +3660,9 @@ function AppContent() {
                       </b>
                       On their tablet: sign in as <i>you</i>, then press the <b>padlock</b> in the header to
                       turn on Care Lock and hand it over. The device stays in your circle, and the caregiver
-                      controls disappear so a stray touch cannot reach them.
+                      controls disappear so a stray touch cannot reach them. To hand a device over without
+                      locking it, use the <b>hand-over</b> button beside it — that returns to the role screen
+                      while keeping you signed in.
                       <span className="block mt-1">
                         <b>Do not log out first.</b> Logging out is what disconnects the device — after it,
                         the patient button becomes <b>Try the companion</b> — a demo whose help button never

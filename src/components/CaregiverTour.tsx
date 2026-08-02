@@ -62,7 +62,8 @@ const CaregiverTour: React.FC<CaregiverTourProps> = ({ patientName, onClose, onO
           touch cannot reach anything.
           <span className="block mt-2">
             <b>Do not log out on that device.</b> Your account staying on it is the only thing
-            connecting their help button to your phone.
+            connecting their help button to your phone — logging out is what breaks it. If you
+            only want the role screen back, use the hand-over button beside the padlock.
           </span>
         </>
       ),
