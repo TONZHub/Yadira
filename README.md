@@ -93,6 +93,10 @@ is a different act.
   devices.
 - **Voice cloning** — a guided flow for giving a represented persona the real
   person's voice.
+- **A first run that asks** — a new caregiver chooses between a sample family
+  and setting up their own, then gets a short walkthrough. Neither is ever
+  shown on the patient's screen or under Care Lock; the walkthrough reopens
+  from the **?** in the header.
 
 ### The lucidity tripwire
 
@@ -251,6 +255,13 @@ Some of these look like limitations and are load-bearing:
   to supply ours. That is fine for reaching a caregiver, which is why the phone
   is used only for that — a familiar name in an unfamiliar voice is not the same
   person to someone whose recognition is failing.
+- **Sample data is chosen, never assumed.** A new circle used to be seeded with
+  a sample family silently — and those logs feed the AI care reports and Ask
+  Yadira, which the app calls "grounded in the patient's own records". A real
+  caregiver could therefore generate a clinical report about a fictional woman
+  on day one, indistinguishable from a real one. Caregivers are now asked; the
+  demo path still seeds itself, because a companion with no memories is not a
+  demo of anything.
 - **Mood is never guessed.** Where the patient said nothing clear, the record
   says so. A fabricated wellbeing signal gets charted and acted on. The vocal
   tone read is held to the same rule: `unclear` is a first-class answer, a

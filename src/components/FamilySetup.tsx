@@ -16,6 +16,13 @@ export interface FamilyPackApply {
 interface FamilySetupProps {
   onClose: () => void;
   onApply: (pack: FamilyPackApply, label: string) => void;
+  /**
+   * Opened as the first question a new caregiver is asked, rather than reached
+   * from a menu. Only the wording changes — the choice, and both code paths
+   * behind it, are the same. Closing without choosing means "start empty",
+   * which the copy says out loud so nobody thinks they cancelled something.
+   */
+  firstRun?: boolean;
 }
 
 type Tab = 'samples' | 'create';
@@ -48,7 +55,7 @@ const THEME_OPTIONS: { value: Memory['imageTheme']; label: string }[] = [
   { value: 'retro', label: 'Youth / Era' },
 ];
 
-export default function FamilySetup({ onClose, onApply }: FamilySetupProps) {
+export default function FamilySetup({ onClose, onApply, firstRun = false }: FamilySetupProps) {
   const [tab, setTab] = useState<Tab>('samples');
 
   // ---- create-your-own form state ----
@@ -114,13 +121,30 @@ export default function FamilySetup({ onClose, onApply }: FamilySetupProps) {
         {/* Header */}
         <div className="sticky top-0 bg-white border-b border-[#E3DFC2] px-6 py-4 flex items-center justify-between rounded-t-3xl">
           <div>
-            <h3 className="text-xl font-bold text-[#2C2C2A]">Set Up a Care Circle</h3>
-            <p className="text-xs text-[#7E7D76] mt-0.5">Load a sample family, or create your own from scratch.</p>
+            <h3 className="text-xl font-bold text-[#2C2C2A]">
+              {firstRun ? 'Welcome — how would you like to start?' : 'Set Up a Care Circle'}
+            </h3>
+            <p className="text-xs text-[#7E7D76] mt-0.5">
+              {firstRun
+                ? 'Explore a sample family, or set up the person you actually care for.'
+                : 'Load a sample family, or create your own from scratch.'}
+            </p>
           </div>
-          <button onClick={onClose} className="p-2 rounded-xl text-[#A6A27B] hover:text-[#2C2C2A] hover:bg-[#F4F1EA] transition-all" aria-label="Close">
+          <button onClick={onClose} className="p-2 rounded-xl text-[#A6A27B] hover:text-[#2C2C2A] hover:bg-[#F4F1EA] transition-all" aria-label={firstRun ? 'Start with an empty care circle' : 'Close'}>
             <X className="w-5 h-5" />
           </button>
         </div>
+
+        {firstRun && (
+          <div className="px-6 pt-4">
+            <p className="text-[11px] leading-snug text-[#5E5D57] bg-[#FCFAF5] border border-[#E3DFC2] rounded-xl px-3 py-2">
+              A sample family fills the hub with a complete history so you can see how everything
+              works. <b>It is not real</b> — the care reports and Ask Yadira read these logs, so
+              anything they say about a sample is about the sample. Set up your own person when you
+              are ready; you can switch at any time from Family Setup.
+            </p>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="px-6 pt-4">
