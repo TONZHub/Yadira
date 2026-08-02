@@ -36,8 +36,10 @@ import {
   Minimize,
   ALargeSmall,
   Moon,
-  Sun
+  Sun,
+  Mail
 } from 'lucide-react';
+
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import type { Message, Memory, CustomFAQ, DailyLog, RoutineItem, PersonaFile, SessionMoment, MoodCheckIn, GalleryPhoto } from './types';
 import { DEFAULT_PROFILE, DEFAULT_PERSONA_FILE } from './types';
@@ -2225,6 +2227,44 @@ function AppContent() {
     return `Here is what was recorded over the last ${week.length} day${week.length === 1 ? '' : 's'}. ${days}.`;
   };
 
+  // ---- The week, as an email ----
+  // The weekly digest a scheduler would have sent. Asked for on load rather
+  // than pushed on a timer: the server holds no durable schedule, and an
+  // inbox waits, so a digest that arrives when the caregiver next opens the
+  // app is still a weekly digest. `auto` lets the server enforce one a week.
+  const sendBriefingEmail = async (auto: boolean) => {
+    try {
+      const res = await apiCall('/api/email/briefing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          auto,
+          patientName,
+          caregiverName: profile.caregiverName,
+          briefing: briefingText(),
+          alerts: aiInsights?.criticalAlerts || [],
+          tips: aiInsights?.actionableTips || [],
+        }),
+      });
+      const data = await res.json();
+      if (!auto) {
+        if (res.ok && !data.skipped) toastSuccess('Sent', 'The week is in your inbox.');
+        else if (!res.ok) toastError('Could not send', data.error || 'Please try again.');
+      }
+    } catch {
+      if (!auto) toastError('Could not send', 'Could not reach the server.');
+    }
+  };
+
+  // Once per session, on the caregiver hub. The server decides whether a week
+  // has actually passed — the client only offers the opportunity.
+  useEffect(() => {
+    if (isPatientSession || !isPremium) return;
+    const t = setTimeout(() => sendBriefingEmail(true), 4000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPatientSession, isPremium]);
+
   // ---- Ask Yadira, by phone ----
   // The dashboard is only usable by someone sitting at it. This is the same
   // week, spoken, for the caregiver in a car or a corridor. It reuses the
@@ -2975,6 +3015,16 @@ function AppContent() {
                     >
                       <Phone className="w-3.5 h-3.5" />
                       {briefingCalling ? 'Calling you…' : 'Call me with the week'}
+                    </button>
+                    <button
+                      type="button"
+                      id="btn-briefing-email"
+                      onClick={() => sendBriefingEmail(false)}
+                      title="Send the week to your inbox now"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl border border-[#E3DFC2] text-[#5E5D57] text-[11px] font-bold hover:bg-[#F4F1EA] transition-all active:scale-95"
+                    >
+                      <Mail className="w-3.5 h-3.5" />
+                      Email me the week
                     </button>
                   </div>
                 </div>

@@ -10,6 +10,12 @@
 
 import express from 'express';
 import type { AuthenticatedRequest } from './auth';
+import {
+  renderBriefingEmail,
+  alreadySentThisWeek,
+  markWeeklySent,
+  clearWeeklySent,
+} from './briefingEmail';
 
 const RESEND_API = 'https://api.resend.com/emails';
 
@@ -182,6 +188,63 @@ const WELCOME_HTML = `<!DOCTYPE html>
 </body></html>`;
 
 export function registerEmailRoutes(app: express.Express) {
+  // The week, as an email. Asked for on app load (auto=true, at most one a
+  // week) and by the "Email me the week" button (auto=false, always sends).
+  //
+  // A weekly briefing CALL would need a scheduler this architecture does not
+  // have; an inbox waits, so the digest arriving when the caregiver next opens
+  // the app is still a weekly digest. The honest limitation: a caregiver who
+  // never opens the app gets no email. That is a smaller failure than a phone
+  // ringing at an arbitrary hour on a promise we could not keep.
+  app.post('/api/email/briefing', async (req: AuthenticatedRequest, res: express.Response) => {
+    if (!isEmailConfigured()) {
+      return res.status(503).json({ error: 'email_not_configured' });
+    }
+
+    // Always the authenticated account's own address. Never the body — an
+    // endpoint that mails a person's health summary wherever a caller asks is
+    // an exfiltration route with a friendly name.
+    const to = req.user?.email;
+    if (!to || !to.includes('@')) {
+      return res.status(400).json({ error: 'The authenticated account has no email address' });
+    }
+    if (to.endsWith('@yadira.local')) return res.json({ ok: true, skipped: 'local-demo' });
+
+    const circle = String((req as any).user?.uid || to).toLowerCase();
+    const auto = req.body?.auto === true;
+    if (auto && alreadySentThisWeek(circle)) {
+      return res.json({ ok: true, skipped: 'already-sent-this-week' });
+    }
+    // Claimed before sending so two tabs loading at once cannot both send.
+    if (auto) markWeeklySent(circle);
+
+    try {
+      const { subject, html, text } = renderBriefingEmail({
+        patientName: String(req.body?.patientName || 'your loved one'),
+        caregiverName: req.body?.caregiverName ? String(req.body.caregiverName) : undefined,
+        briefing: String(req.body?.briefing || ''),
+        alerts: Array.isArray(req.body?.alerts) ? req.body.alerts.map(String).slice(0, 8) : [],
+        tips: Array.isArray(req.body?.tips) ? req.body.tips.map(String).slice(0, 8) : [],
+        at: Date.now(),
+      });
+
+      const response = await fetch(RESEND_API, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${resendKey()}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: fromAddress(), to: [to], subject, html, text }),
+      });
+      const data: any = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data?.message || `Resend API error ${response.status}`);
+      res.json({ ok: true, id: data?.id || null });
+    } catch (err: any) {
+      // A failed send must not consume the week, or one Resend outage costs
+      // the family an update and nothing says so.
+      if (auto) clearWeeklySent(circle);
+      console.error('[Email] briefing send failed:', err.message || err);
+      res.status(502).json({ error: err.message || 'Failed to send the weekly update' });
+    }
+  });
+
   // Sent by the client right after a successful signup (email/password, or a
   // first-time Google sign-in). The recipient is always the authenticated
   // account's own email — the endpoint takes no address from the body, so it
