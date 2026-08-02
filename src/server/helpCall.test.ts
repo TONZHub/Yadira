@@ -14,6 +14,8 @@ import {
   clearCooldown,
   cooldownRemaining,
   __resetCooldowns,
+  recordOutcome,
+  getOutcome,
   HELP_RESULT_SCHEMA,
   type HelpCallRequest,
 } from './helpCall';
@@ -232,5 +234,71 @@ describe('the test call is unmistakably a test', () => {
 
   test('is explicitly not to be delivered in an alarmed tone', () => {
     assert.match(goal, /not an urgent one/i);
+  });
+});
+
+describe('when the caregiver says they cannot get there', () => {
+  // From a live call: asked "are you able to get to them?", answered no, and
+  // the call said "thank you, bye." That is the moment the patient is LEAST
+  // likely to get help, and it was the moment the call did least.
+
+  const goal = buildHelpCallGoal({
+    toPhone: '+15551234567',
+    patientName: 'Eleanor',
+    caregiverName: 'Thomas',
+    at: Date.now(),
+  });
+
+  test('it does not simply thank them and hang up', () => {
+    assert.match(goal, /do not simply thank them and hang up/i);
+  });
+
+  test('it accepts the answer instead of pressing', () => {
+    assert.match(goal, /"no" is an answer, not a failure/i);
+    assert.match(goal, /do not sound disappointed and do not ask again/i);
+  });
+
+  test('it asks the one question that could still produce a person', () => {
+    assert.match(goal, /anyone else nearby who could look in on them/i);
+  });
+
+  test('it promises only what the app can actually do', () => {
+    // "I'll stay with them" is true — the companion is on their device. It
+    // must not offer to phone the person they name, because it cannot.
+    assert.match(goal, /I'll stay with Eleanor and keep them company/i);
+    assert.match(goal, /do not offer to call that person, because you cannot/i);
+  });
+
+  test('emergency services are offered once, and the choice stays theirs', () => {
+    assert.match(goal, /if you're worried about their safety, please call emergency services/i);
+    assert.match(goal, /their judgement, not yours/i);
+    // Never a diagnosis or an instruction to call — this is not a medical device.
+    assert.doesNotMatch(goal, /you (should|must) call (an ambulance|911|emergency)/i);
+  });
+
+  test('the branch is still bounded in length', () => {
+    assert.match(goal, /under ninety seconds/i);
+  });
+});
+
+describe('"cannot come" and "did not say" are different answers', () => {
+  // They used to collapse into one sentence. They are not the same situation:
+  // one means nobody is coming, the other means we do not know — and the
+  // PATIENT's device reads this to decide what the companion may promise.
+
+  test('the schema still offers all three', () => {
+    assert.deepEqual(HELP_RESULT_SCHEMA.properties.acknowledged.enum, ['yes', 'no', 'unknown']);
+  });
+
+  test('an outcome carries the answer through to the patient side', () => {
+    __resetCooldowns();
+    recordOutcome('circle-a', 'placed', 'Thomas was reached but said they cannot get to Eleanor right now.', 'no');
+    assert.equal(getOutcome('circle-a')?.canGetThere, 'no');
+  });
+
+  test('an outcome with no answer does not claim one', () => {
+    __resetCooldowns();
+    recordOutcome('circle-b', 'placed', 'Calling you now.');
+    assert.equal(getOutcome('circle-b')?.canGetThere, undefined);
   });
 });

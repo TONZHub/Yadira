@@ -123,7 +123,13 @@ patient presses help
 ```
 
 The call confirms who answered *before* disclosing anything, says only who asked
-for them and when, and never rings twice for repeated presses. Full design in
+for them and when, and never rings twice for repeated presses. When the
+caregiver says they *cannot* get there — the moment the patient is least likely
+to get help, and the one the call used to answer with "thank you, goodbye" — it
+accepts that without pressing, asks once whether anyone else is nearby, says the
+one thing that is actually true (the companion stays with them), and leaves the
+decision to call emergency services where it belongs. That answer also travels
+back: the companion stops telling the patient someone is on their way. Full design in
 [`calle/`](calle/), which also holds the reusable Agent Skill.
 
 **One setup step decides whether any of it works.** On the patient's device,
@@ -152,8 +158,11 @@ process.
 
 ```
 src/
-  App.tsx              the app — patient view and caregiver hub
-  components/          patient-facing UI, sensory rooms, Hattie
+  App.tsx              state, effects, and the shell that wires them together
+  components/
+    PatientView.tsx    the patient's whole screen
+    hub/               the caregiver hub's tabs — settings, today, memories
+    ...                sensory rooms, Hattie, call mode, modals
   lodge/               Hattie's Lodge (the caregiver's own space)
   lib/                 auth, per-circle store, theme, sound, demo data
   server/
@@ -205,7 +214,7 @@ mode; with no Firebase config it runs entirely on localStorage.
 npm run build             # client + bundled server
 npm start                 # serve on PORT (default 3000)
 npm run lint              # tsc --noEmit
-npm test                  # 224 tests, node:test
+npm test                  # 241 tests, node:test
 ```
 
 ### Configuration
@@ -308,6 +317,10 @@ Some of these look like limitations and are load-bearing:
 | [calle/FEEDBACK.md](calle/FEEDBACK.md) | What building on CALL-E surfaced, measured on live calls |
 | [SPONSORS.md](SPONSORS.md) | Why sponsorship keeps this free for families |
 | [docs/demo/](docs/demo/) | Demo reel script, FAQ video script, camera-ready seeding |
+
+CI runs `npm run lint`, `npm test` and a production build on every pull
+request, and boots the bundled server to prove it answers — a bundle that
+compiles but throws on start is a green tick and a dead deploy.
 
 ## License
 

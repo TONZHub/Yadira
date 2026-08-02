@@ -1,0 +1,76 @@
+# The checks every change should have been getting.
+#
+# There are 233 tests in this repo and, until this file, nothing ran them on a
+# push. Several of the bugs fixed in the last week were caught by a person on a
+# phone rather than by a machine on a branch — this is the cheapest available
+# apology for that.
+#
+# Deliberately three jobs' worth of work in one: types, tests, and a real
+# production build. The build matters as much as the tests here, because the
+# server is bundled with esbuild and a broken import only shows up there.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same branch makes the first run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: types · tests · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # actions/checkout stores the workflow token in .git/config by
+          # default, where `npm ci` lifecycle scripts and every later step can
+          # read it. Nothing here pushes, so nothing here needs it.
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      # Firebase off: the build must not need credentials, and this is the
+      # configuration the tests and local verification runs use.
+      - name: Build (client + bundled server)
+        run: npm run build
+        env:
+          VITE_FIREBASE_API_KEY: 'off'
+
+      - name: Server bundle starts
+        # A bundle that builds but throws on boot is a green tick and a dead
+        # deploy. Start it, prove it answers, stop it.
+        run: |
+          PORT=9099 node dist/server.cjs &
+          SERVER_PID=$!
+          for i in $(seq 1 20); do
+            if curl -fsS -o /dev/null "http://127.0.0.1:9099/"; then
+              echo "server answered on attempt $i"
+              kill $SERVER_PID
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "server never answered"
+          kill $SERVER_PID 2>/dev/null || true
+          exit 1

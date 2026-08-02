@@ -216,7 +216,15 @@ app.post('/api/shared-mode', async (req, res) => {
 const sharedCaregiverAlert = new Map<string, { active: boolean; at: number }>();
 
 app.get('/api/caregiver-alert', async (req, res) => {
-  res.json(sharedCaregiverAlert.get(circleOf(req)) ?? { active: false, at: 0 });
+  const circle = circleOf(req);
+  const state = sharedCaregiverAlert.get(circle) ?? { active: false, at: 0 };
+  // Carried on the alert the patient's device is ALREADY polling, rather than
+  // a second request: when the caregiver has said on the phone that they
+  // cannot get there, the companion must stop telling the patient they are on
+  // their way. Only this one field crosses — never the summary, which is
+  // written for the caregiver and would land badly on the patient's screen.
+  const outcome = getOutcome(circle);
+  res.json({ ...state, canGetThere: outcome?.canGetThere ?? 'unknown' });
 });
 
 app.post('/api/caregiver-alert', async (req, res) => {
@@ -283,7 +291,7 @@ app.post('/api/caregiver-alert', async (req, res) => {
         region: req.body?.region ? String(req.body.region) : undefined,
       })
         .then((r) => {
-          recordOutcome(circle, 'placed', r.summary);
+          recordOutcome(circle, 'placed', r.summary, r.canGetThere);
           console.info(`[Yadira CALL-E] help call ${r.callId}: ${r.summary}`);
         })
         .catch((err) => {
