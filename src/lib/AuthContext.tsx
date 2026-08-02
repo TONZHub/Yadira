@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, getAdditionalUserInfo, Auth } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from './firebase';
-import { isUnlinkedPatientCircle, localUid, UNLINKED_PATIENT_EMAIL } from './localSession';
+import { isUnlinkedPatientCircle, localUid, parseJwtPayload, UNLINKED_PATIENT_EMAIL } from './localSession';
 
 interface AuthContextType {
   user: { uid: string; email: string | null } | null;
@@ -37,19 +37,6 @@ function createLocalDemoToken(uid: string, email: string): string {
     })
   );
   return `${header}.${payload}.local-dev-signature`;
-}
-
-function parseJwtPayload(token: string): { uid?: string; user_id?: string; sub?: string; email?: string } | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length < 2) return null;
-    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
-    const payload = JSON.parse(atob(padded));
-    return payload;
-  } catch {
-    return null;
-  }
 }
 
 function startLocalSession(

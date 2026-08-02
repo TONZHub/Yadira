@@ -131,9 +131,11 @@ sign in with the caregiver's account and then press the padlock — **Care
 Lock** — to hand it over. *Do not log out.* The circle id is the account's
 uid, so the account staying on the device is the only thing putting it in the
 family's circle; log out and the patient button becomes a demo in a circle of its own, where
-the alert reaches nobody and there is no number to ring. The app warns on the
-role screen, in the caregiver's help-call card, and in the logout confirmation
-itself — and an unlinked device never tells the patient that someone has been
+the alert reaches nobody and there is no number to ring. The role screen names
+the account it is actually carrying — "Signed in as ruth@example.com" — because
+a claim you can check beats one you have to trust, and a leftover demo token
+used to be enough to make the device say it was connected. The app also warns
+in the caregiver's help-call card and in the logout confirmation itself — and an unlinked device never tells the patient that someone has been
 told and is coming. A promise nobody can keep is worse than silence.
 
 ---
@@ -198,7 +200,7 @@ mode; with no Firebase config it runs entirely on localStorage.
 npm run build             # client + bundled server
 npm start                 # serve on PORT (default 3000)
 npm run lint              # tsc --noEmit
-npm test                  # 173 tests, node:test
+npm test                  # 180 tests, node:test
 ```
 
 ### Configuration

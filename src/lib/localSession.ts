@@ -74,6 +74,52 @@ function deviceSuffix(): string {
  * built from. Devices that already hold a legacy suffix-free uid keep it for
  * the same reason.
  */
+/** Read a JWT's payload without verifying it — identity for display only. */
+export function parseJwtPayload(
+  token: string
+): { uid?: string; user_id?: string; sub?: string; email?: string } | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length < 2) return null;
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4);
+    return JSON.parse(atob(padded));
+  } catch {
+    return null;
+  }
+}
+
+export type DeviceAccount =
+  /** Nobody has signed in here, and no demo has been started. */
+  | { state: 'none' }
+  /** A demo session left its token behind. This device is in nobody's circle. */
+  | { state: 'demo' }
+  /** A real account. `email` names it, so the claim can be checked at a glance. */
+  | { state: 'linked'; email?: string };
+
+/**
+ * What kind of account, if any, this device is carrying.
+ *
+ * The first version of this asked only "is there a token?", which is a
+ * question with a misleading answer. Tapping the demo button once mints a
+ * token and stores it — so from then on the role screen said "Connected to
+ * your care circle" on a device connected to nothing at all, permanently, and
+ * the more confidently the longer it had been used. Exactly the reassurance
+ * this screen exists to avoid giving falsely.
+ *
+ * `demo` and `none` are treated the same by callers; they are kept apart
+ * because "you started a demo here" and "this device is new" are different
+ * things to say to someone setting up a tablet.
+ */
+export function readDeviceAccount(token: string | null, storedUid: string | null): DeviceAccount {
+  if (!token) return { state: 'none' };
+  const payload = parseJwtPayload(token);
+  const uid = storedUid || payload?.uid || payload?.user_id || payload?.sub;
+  if (!uid) return { state: 'none' };
+  if (isUnlinkedPatientCircle(uid)) return { state: 'demo' };
+  return { state: 'linked', email: payload?.email };
+}
+
 export function localUid(email: string, existingUid?: string | null): string {
   const base = localBase(email);
   // Minted before the suffix existed. Re-deriving would orphan their data.
