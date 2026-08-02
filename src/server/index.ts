@@ -354,13 +354,23 @@ app.post('/api/aurora-mode', async (req, res) => {
 
 // Helper to check if Gemini access (Enterprise Platform or AI Studio) is configured at all
 const isGeminiKeyMissing = !useEnterprisePlatform && (!geminiApiKey || geminiApiKey === 'MY_GEMINI_API_KEY' || geminiApiKey.trim() === '');
+// Point the SDK at a local stand-in, the way CALLE_API_BASE_URL already lets
+// the phone call be exercised without ringing anyone. Unset in production;
+// what it buys is the ability to drive the real routes against the real client
+// and prove behaviour like the vision-model fallback, instead of testing a
+// re-implementation of it and hoping the route matches.
+const geminiBaseUrl = process.env.GEMINI_BASE_URL;
+const httpOptions = geminiBaseUrl ? { httpOptions: { baseUrl: geminiBaseUrl } } : {};
 const genAI = isGeminiKeyMissing
   ? null
   : gcpProject
-    ? new GoogleGenAI({ enterprise: true, project: gcpProject, location: gcpLocation })
+    ? new GoogleGenAI({ enterprise: true, project: gcpProject, location: gcpLocation, ...httpOptions })
     : enterpriseApiKey
-      ? new GoogleGenAI({ enterprise: true, apiKey: enterpriseApiKey })
-      : new GoogleGenAI({ apiKey: geminiApiKey });
+      ? new GoogleGenAI({ enterprise: true, apiKey: enterpriseApiKey, ...httpOptions })
+      : new GoogleGenAI({ apiKey: geminiApiKey, ...httpOptions });
+if (geminiBaseUrl) {
+  console.warn(`[Yadira] GEMINI_BASE_URL is set — Gemini calls go to ${geminiBaseUrl}, not Google.`);
+}
 
 // Gemini structured-JSON helper — used for the clinical/administrative cues
 // (routine generation, insights summarization) where Gemini's clinical tone
@@ -1837,9 +1847,19 @@ app.post('/api/analyze-media', async (req, res) => {
 
     // Pro-class Gemini vision — family photos deserve the model that catches
     // the wedding band, the make of the truck, the era of the wallpaper.
-    const response = await genAI.models.generateContent({
-      model: GEMINI_VISION_MODEL,
-      contents: [
+    //
+    // But GEMINI_VISION_MODEL is DERIVED by swapping "flash" for "pro" in the
+    // configured model name, which is a guess about what exists on this
+    // account. When the guess is wrong every photo fails instantly while the
+    // rest of the app works fine, because everything else uses the base model
+    // — a failure that looks like "photos are broken" rather than "that model
+    // name is not real". So the base model is a fallback rather than nothing:
+    // flash reads a photograph perfectly well, just with less of the fine
+    // detail, and a slightly plainer caption beats a red banner mid-demo.
+    const attempt = async (model: string) =>
+      genAI!.models.generateContent({
+        model,
+        contents: [
         {
           role: 'user',
           parts: [
@@ -1863,8 +1883,30 @@ Respond ONLY with the JSON object, no markdown fences.`,
           ],
         },
       ],
-      config: { responseMimeType: 'application/json' },
-    });
+        config: { responseMimeType: 'application/json' },
+      });
+
+    // Distinct names only — when the derivation was a no-op there is nothing
+    // to fall back to, and calling the same model twice just doubles the wait.
+    const candidates = [...new Set([GEMINI_VISION_MODEL, GEMINI_MODEL])];
+    let response: Awaited<ReturnType<typeof attempt>> | null = null;
+    let lastError: any = null;
+    for (const model of candidates) {
+      try {
+        response = await attempt(model);
+        if (model !== candidates[0]) {
+          console.warn(
+            `[Yadira] Photo analysis fell back to ${model} — ${candidates[0]} failed. ` +
+              'Set GEMINI_VISION_MODEL to a pro-class model that exists on this account.'
+          );
+        }
+        break;
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`[Yadira] Photo analysis failed on ${model}: ${String(err?.message || err).slice(0, 200)}`);
+      }
+    }
+    if (!response) throw lastError || new Error('Photo analysis failed on every configured model');
 
     const text = response.text;
     if (!text) {
@@ -1886,9 +1928,23 @@ Respond ONLY with the JSON object, no markdown fences.`,
 
     res.json(insight);
   } catch (err: any) {
-    console.error('[Yadira] Media analysis error:', err.message || err);
-    res.status(500).json({
-      error: 'Media analysis failed',
+    // Name the models. "Media analysis failed" sent a caregiver hunting
+    // through their photo for the problem when the answer was a model name
+    // that does not exist on their account — and the one string that would
+    // have said so only ever reached a server log.
+    //
+    // The SDK puts the API's JSON body in err.message, which is unreadable as
+    // a sentence; pull the message out of it when it is there.
+    const raw = String(err?.message || err);
+    let detail = raw;
+    try {
+      const parsed = JSON.parse(raw.slice(raw.indexOf('{')));
+      if (parsed?.error?.message) detail = String(parsed.error.message);
+    } catch { /* not JSON — the raw text is the best we have */ }
+    const tried = [...new Set([GEMINI_VISION_MODEL, GEMINI_MODEL])].join(' then ');
+    console.error(`[Yadira] Media analysis error (tried ${tried}):`, detail.slice(0, 300));
+    res.status(502).json({
+      error: `Photo analysis failed. Tried ${tried} — ${detail.slice(0, 200)}`,
       description: 'Photo',
       emotion: 'neutral',
       suggestions: [],
