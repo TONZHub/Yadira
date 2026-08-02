@@ -236,9 +236,17 @@ export const LoginScreen: React.FC = () => {
               <div className="rounded-xl border border-[#E3DFC2] bg-[#FCFAF5] p-3.5 text-left">
                 <p className="text-xs text-[#5A594F] leading-relaxed">
                   <span className="font-bold text-[#2C2C2A]">Setting up the patient's own device?</span>{' '}
-                  Sign in with the caregiver's account, then press the <b>padlock</b> in the header to
-                  hand it over. Staying signed in is what connects the help button to you — tapping
-                  below instead starts a session of its own, and nothing it raises reaches your phone.
+                  Sign in below with the caregiver's account first. That account staying on the device
+                  is what connects their help button to your phone.
+                </p>
+                <p className="text-xs text-[#5A594F] leading-relaxed mt-2">
+                  Once you are in, <b>hand over</b> in the header brings you back to this screen still
+                  signed in — then they tap <b>I&rsquo;m a Patient</b>. On their own tablet, add the{' '}
+                  <b>padlock</b> as well, so the caregiver controls are out of reach.
+                </p>
+                <p className="text-xs text-[#5A594F] leading-relaxed mt-2">
+                  Tapping below <i>without</i> signing in starts a demo in a circle of its own. Nothing
+                  it raises reaches you.
                 </p>
                 <button
                   type="button"
