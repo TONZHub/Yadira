@@ -69,12 +69,20 @@ describe('it must still carry ordinary speech faithfully', () => {
     assert.equal(r.text, 'I miss him Is it Tuesday I would like a cup of tea');
   });
 
-  test('genuine repetition by the patient is preserved', () => {
+  test('repetition the patient actually said is preserved', () => {
     // Repeating yourself is a symptom, not a glitch — this app answers the
-    // hundredth repetition as warmly as the first, so it must not be
-    // deduplicated away.
-    const r = readSpeechResults(results(['Where is Beth', true], ['Where is Beth', true]));
+    // hundredth repetition as warmly as the first, so it must not be tidied
+    // away. Speech that repeats arrives as repetition INSIDE a segment, which
+    // is untouched.
+    const r = readSpeechResults(results(['Where is Beth Where is Beth', true]));
     assert.equal(r.text, 'Where is Beth Where is Beth');
+  });
+
+  test('...but two identical SEGMENTS collapse, and that is the trade', () => {
+    // No speaker produces this; the restating engine produces it constantly.
+    // Losing one duplicated segment is far cheaper than the wall of text.
+    const r = readSpeechResults(results(['Where is Beth', true], ['Where is Beth', true]));
+    assert.equal(r.text, 'Where is Beth');
   });
 
   test('spacing between segments is tidied, not the content', () => {
@@ -105,5 +113,61 @@ describe('the ceiling', () => {
   test('but a normal sentence is nowhere near it', () => {
     const r = readSpeechResults(results(['I know I have dementia and I am frightened', true]));
     assert.equal(r.text, 'I know I have dementia and I am frightened');
+  });
+});
+
+describe('the restating engine — the second half of the same bug', () => {
+  // Reported after the first fix, from a real microphone:
+  //
+  //   "hello hello hello this hello this is hello this is a
+  //    hello this is a developer hello this is a developer I am just"
+  //
+  // Not reading from resultIndex was only half of it. This engine emits every
+  // segment as a RESTATEMENT of the whole utterance so far, so concatenating
+  // the segments reproduced the failure even with the accumulator gone.
+
+  const restating = (...phrases: string[]) =>
+    results(...phrases.map((p) => [p, true] as [string, boolean]));
+
+  test('the exact reported sequence comes back as one clean sentence', () => {
+    const r = readSpeechResults(
+      restating(
+        'hello',
+        'hello',
+        'hello this',
+        'hello this is',
+        'hello this is',
+        'hello this is a',
+        'hello this is a developer',
+        'hello this is a developer',
+        'hello this is a developer I',
+        'hello this is a developer I am',
+        'hello this is a developer I am just'
+      )
+    );
+    assert.equal(r.text, 'hello this is a developer I am just');
+  });
+
+  test('an interim that restates the final does not double it', () => {
+    // The same engine habit across the final/interim boundary.
+    const r = readSpeechResults(results(['hello this is', true], ['hello this is a developer', false]));
+    assert.equal(r.text, 'hello this is a developer');
+  });
+
+  test('a well-behaved engine is completely unaffected', () => {
+    // Segments that are genuinely new still append, exactly as before.
+    const r = readSpeechResults(results(['I miss him', true], ['Is it Tuesday', true]));
+    assert.equal(r.text, 'I miss him Is it Tuesday');
+  });
+
+  test('a restatement that then diverges keeps both parts', () => {
+    // "hello this" grows to "hello this is", then a separate thought arrives.
+    const r = readSpeechResults(restating('hello this', 'hello this is', 'and I fell this morning'));
+    assert.equal(r.text, 'hello this is and I fell this morning');
+  });
+
+  test('no growth however many times a restatement repeats', () => {
+    const many = restating(...Array.from({ length: 200 }, () => 'I am feeling okay'));
+    assert.equal(readSpeechResults(many).text, 'I am feeling okay');
   });
 });

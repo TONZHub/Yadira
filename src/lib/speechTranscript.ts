@@ -65,15 +65,43 @@ export function readSpeechResults(
   const length = results?.length ?? 0;
   for (let i = 0; i < length; i++) {
     const result = results![i];
-    const spoken = result?.[0]?.transcript ?? '';
+    const spoken = collapse(result?.[0]?.transcript ?? '');
     if (!spoken) continue;
-    if (result.isFinal) final += `${spoken} `;
-    else interim += spoken;
+    if (result.isFinal) final = join(final, spoken);
+    else interim = join(interim, spoken);
   }
-  final = collapse(final);
-  interim = collapse(interim);
-  const text = cap(collapse(`${final} ${interim}`));
+  const text = cap(join(final, interim));
   return { final: cap(final), interim: cap(interim), text };
+}
+
+/**
+ * Add one segment to the transcript, or recognise that it IS the transcript.
+ *
+ * The second half is the part that matters. Not reading from resultIndex was
+ * only half the fix — some engines emit every segment as a RESTATEMENT of the
+ * whole utterance so far:
+ *
+ *   "hello" · "hello" · "hello this" · "hello this is" · "hello this is a" …
+ *
+ * Concatenating those reproduces the reported failure exactly:
+ *
+ *   "hello hello hello this hello this is hello this is a …"
+ *
+ * So a segment that contains everything already collected replaces it instead
+ * of extending it. Anything genuinely new is still appended.
+ *
+ * The cost, stated plainly: two IDENTICAL consecutive segments collapse to
+ * one. That is the right trade. A person repeating themselves — which this app
+ * treats as a symptom to answer warmly, never a glitch to clean up — is
+ * transcribed as repetition INSIDE a segment ("where is beth where is beth"),
+ * and that survives untouched. It is only segment-level duplication, which no
+ * speaker produces and this engine does constantly, that is dropped.
+ */
+function join(collected: string, next: string): string {
+  if (!collected) return next;
+  if (!next) return collected;
+  if (next.length >= collected.length && next.startsWith(collected)) return next;
+  return `${collected} ${next}`;
 }
 
 /** Engines vary on leading/trailing spaces between segments. */
