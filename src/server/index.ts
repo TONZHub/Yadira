@@ -1038,7 +1038,7 @@ ${COMPANION_GUARDRAILS}`;
 //   4. none            → 501; the client falls back to the browser's own
 //      Web Speech recognition, so dictation never goes dark.
 app.post('/api/transcribe', async (req, res) => {
-  const { audio, mimeType, durationMs, peakLevel } = req.body || {};
+  const { audio, mimeType, durationMs, peakAmplitude } = req.body || {};
   if (!audio || typeof audio !== 'string') {
     return res.status(400).json({ error: 'audio (base64) is required' });
   }
@@ -1050,8 +1050,13 @@ app.post('/api/transcribe', async (req, res) => {
   // the patient said. Reported from a live session: "double o seven" and
   // "The system is down".
   const bytes = Math.floor((b64.length * 3) / 4);
-  if (looksLikeSilence({ bytes, durationMs, peakLevel })) {
-    console.info('[Yadira] Transcription skipped — the recording was silence.');
+  if (looksLikeSilence({ bytes, durationMs, peakAmplitude })) {
+    // Logged with the evidence. When this guard was measuring the wrong thing
+    // it refused every recording, and a bare "was silence" line gave nobody
+    // the one number that would have shown it.
+    console.info(
+      `[Yadira] Transcription skipped — recording looked like silence (${bytes}B, ${durationMs ?? '?'}ms, peak ${peakAmplitude ?? '?'}).`
+    );
     return res.json({ text: '', provider: 'skipped-silence' });
   }
 

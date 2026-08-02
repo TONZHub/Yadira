@@ -33,7 +33,25 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
   const [waveformLevel, setWaveformLevel] = useState(0);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordStartedAtRef = useRef(0);
-  const peakLevelRef = useRef(0);
+  // Loudest sample seen, as a fraction of full scale, and whether the analyser
+  // was genuinely running when we read it.
+  //
+  // The distinction is the whole bug. This meter began life as decoration for
+  // the waveform bar, so every way it could fail was harmless and silently
+  // caught. Then the silence guard started trusting it, and each of those
+  // harmless failures became "the microphone does not work":
+  //
+  //   · Safari exposes only webkitAudioContext, so `new AudioContext()` threw,
+  //     the catch below swallowed it, and the level stayed 0 forever.
+  //   · A context that has not been resumed reads every bin as 0 while
+  //     reporting no error at all.
+  //
+  // Both reported a confident 0, the guard read 0 as "silent room", and every
+  // recording on that device was thrown away. An unmeasurable level must be
+  // reported as *unknown*, never as silence.
+  const peakAmplitudeRef = useRef(0);
+  const levelMeasuredRef = useRef(false);
+  const timeDataRef = useRef<Uint8Array | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const recorderMimeRef = useRef('audio/webm');
   // Live-caption text mirrored in a ref so the async stop handler always
@@ -106,31 +124,60 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
       recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
       recorder.start();
       recordStartedAtRef.current = Date.now();
-      peakLevelRef.current = 0;
+      peakAmplitudeRef.current = 0;
+      levelMeasuredRef.current = false;
       mediaRecorderRef.current = recorder;
     } catch {
       mediaRecorderRef.current = null; // captions-only mode
     }
 
-    // Waveform visualization
+    // Waveform visualization, and the level reading the silence guard depends on
     try {
-      const audioContext = new (window as any).AudioContext();
+      const AudioCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtor) throw new Error('no AudioContext');
+      const audioContext = new AudioCtor();
+      // Contexts can start suspended, and a suspended analyser returns zeros
+      // rather than an error. Resume before believing anything it says.
+      if (audioContext.state === 'suspended') await audioContext.resume().catch(() => {});
       audioContextRef.current = audioContext;
       const analyzer = audioContext.createAnalyser();
       analyzerRef.current = analyzer;
       audioContext.createMediaStreamSource(stream).connect(analyzer);
       const dataArray = new Uint8Array(analyzer.frequencyBinCount);
       dataArrayRef.current = dataArray;
+      timeDataRef.current = new Uint8Array(analyzer.fftSize);
       const updateWaveform = () => {
-        if (analyzerRef.current && dataArrayRef.current && mediaStreamRef.current) {
+        if (analyzerRef.current && dataArrayRef.current && timeDataRef.current && mediaStreamRef.current) {
+          // Two different measurements from the same analyser, because they
+          // answer two different questions.
+          //
+          // The bar is decorative, so it uses the mean of the frequency bins —
+          // it moves smoothly and looks like a voice.
           analyzerRef.current.getByteFrequencyData(dataArrayRef.current);
           const average = dataArrayRef.current.reduce((a, b) => a + b) / dataArrayRef.current.length;
-          const level = average / 255;
-          // The waveform already measures this; remembering the peak is what
-          // tells us afterwards whether anybody actually spoke. Silence sent to
-          // a transcription model comes back as confident invented text.
-          if (level > peakLevelRef.current) peakLevelRef.current = level;
-          setWaveformLevel(level);
+          setWaveformLevel(average / 255);
+
+          // "Did anybody actually speak?" is a question about amplitude, so it
+          // reads the loudest SAMPLE from the time domain rather than the bar's
+          // spectral average — that average is a decibel mapping, and comparing
+          // it against an amplitude threshold only ever worked by coincidence.
+          // The time-domain waveform is centred on 128; distance from centre is
+          // amplitude.
+          analyzerRef.current.getByteTimeDomainData(timeDataRef.current);
+          let peak = 0;
+          for (let i = 0; i < timeDataRef.current.length; i++) {
+            const amplitude = Math.abs(timeDataRef.current[i] - 128) / 128;
+            if (amplitude > peak) peak = amplitude;
+          }
+          if (peak > peakAmplitudeRef.current) peakAmplitudeRef.current = peak;
+          // Only a running context that has actually seen a non-zero sample
+          // counts as a reading. A live microphone in a quiet room still has a
+          // noise floor; a flat zero means the plumbing failed, not that the
+          // room was silent, and calling that silence is what killed dictation.
+          if (peak > 0 && audioContextRef.current?.state === 'running') {
+            levelMeasuredRef.current = true;
+          }
+
           requestAnimationFrame(updateWaveform);
         }
       };
@@ -176,13 +223,16 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({ onTranscript, disabled =
       // back. Duration and peak level are sent too, so the server can refuse on
       // evidence rather than on file size alone.
       const durationMs = recordStartedAtRef.current ? Date.now() - recordStartedAtRef.current : undefined;
-      const peakLevel = peakLevelRef.current;
+      // Omitted, not zeroed, when the analyser never ran. An unreported level
+      // means "no reading"; a reported 0 would mean "silent room", and a
+      // browser that refused us an AudioContext has told us neither.
+      const peakAmplitude = levelMeasuredRef.current ? peakAmplitudeRef.current : undefined;
       if (recorded && recorded.size > 1200) {
         const audio = await blobToBase64(recorded);
         const r = await fetch('/api/transcribe', {
           method: 'POST',
           headers: authHeaders(),
-          body: JSON.stringify({ audio, mimeType: recorderMimeRef.current, durationMs, peakLevel }),
+          body: JSON.stringify({ audio, mimeType: recorderMimeRef.current, durationMs, peakAmplitude }),
         });
         if (r.ok) {
           const data = await r.json();

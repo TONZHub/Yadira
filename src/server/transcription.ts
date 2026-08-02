@@ -19,8 +19,18 @@
 /** Below this, a recording is a fumbled tap rather than a sentence. */
 export const MIN_DURATION_MS = 500;
 
-/** Peak microphone level, 0–1. Below this the room was effectively silent. */
-export const MIN_PEAK_LEVEL = 0.02;
+/**
+ * Peak amplitude, 0–1, below which the room was effectively silent.
+ *
+ * Set low on purpose. The two failures this sits between are not equally bad:
+ * an invented sentence is caught downstream by isTranscriptionArtifact and, at
+ * worst, is one strange reply — a refused recording is a person with dementia
+ * speaking into a device that acts as though they said nothing, repeatedly,
+ * with no way to tell why. A frail voice at arm's length from a tablet peaks
+ * far lower than a healthy one leaning in, and that voice is the whole point
+ * of this app. When in doubt, transcribe.
+ */
+export const MIN_PEAK_AMPLITUDE = 0.01;
 
 /** A webm/opus container with no audio in it still weighs a few hundred bytes. */
 export const MIN_AUDIO_BYTES = 1200;
@@ -28,8 +38,25 @@ export const MIN_AUDIO_BYTES = 1200;
 export interface AudioHints {
   /** How long the recorder ran, when the client reports it. */
   durationMs?: number;
-  /** Peak level the analyser saw, 0–1, when the client reports it. */
-  peakLevel?: number;
+  /**
+   * Loudest sample in the recording as a fraction of full scale, 0–1,
+   * measured in the TIME domain — max(|sample − 128|) / 128 over
+   * getByteTimeDomainData.
+   *
+   * ABSENT means the client could not measure, and absent is not zero. That
+   * distinction is what broke dictation: the browser meter feeding this was
+   * decoration before the guard depended on it, so its failure modes were all
+   * silent. Safari has no `window.AudioContext` (only the webkit-prefixed
+   * one) and an unresumed context returns zeros without erroring — both
+   * reported a confident 0, which was read as "silent room", and every
+   * recording on those devices was refused. Nothing in the transcript, no
+   * error, just a microphone that appeared not to work.
+   *
+   * The field was renamed rather than fixed in place so a cached older build
+   * cannot have its differently-measured value read as this one. Its reading
+   * simply goes unreported, and duration and size decide.
+   */
+  peakAmplitude?: number;
   /** Decoded size of the audio payload. */
   bytes: number;
 }
@@ -38,13 +65,14 @@ export interface AudioHints {
  * Should this audio be sent to a transcription model at all?
  *
  * Deliberately only decides on evidence it actually has. A client that reports
- * no hints is trusted apart from the byte floor — an older build should degrade
- * to today's behaviour, not have its dictation silently refused.
+ * no hints is trusted apart from the byte floor — an older build, or one whose
+ * AudioContext was refused by the browser, should degrade to today's behaviour
+ * rather than have its dictation silently refused forever.
  */
 export function looksLikeSilence(hints: AudioHints): boolean {
   if (hints.bytes < MIN_AUDIO_BYTES) return true;
   if (typeof hints.durationMs === 'number' && hints.durationMs < MIN_DURATION_MS) return true;
-  if (typeof hints.peakLevel === 'number' && hints.peakLevel < MIN_PEAK_LEVEL) return true;
+  if (typeof hints.peakAmplitude === 'number' && hints.peakAmplitude < MIN_PEAK_AMPLITUDE) return true;
   return false;
 }
 
