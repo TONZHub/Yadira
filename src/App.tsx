@@ -44,7 +44,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import type { Message, Memory, CustomFAQ, DailyLog, RoutineItem, PersonaFile, SessionMoment, MoodCheckIn, GalleryPhoto } from './types';
 import { DEFAULT_PROFILE, DEFAULT_PERSONA_FILE } from './types';
 import { useStoreList, useStoreDoc } from './lib/useStore';
-import { PRICE_SHORT, type Plan } from './lib/pricing';
+import { PRICE_SHORT, planOf, type Plan } from './lib/pricing';
 import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
@@ -707,13 +707,21 @@ function AppContent() {
 
   // "Get Caregiver Pro" → Stripe Checkout. Falls back to the local demo toggle
   // only when the server reports Stripe isn't configured.
-  const startPremiumCheckout = async (plan: Plan = 'monthly') => {
+  const startPremiumCheckout = async (plan?: Plan) => {
     setPremiumBusy(true);
     try {
+      // Normalised rather than trusted. When this took no arguments it was
+      // safe to pass straight to onClick; the moment it took a plan, React
+      // started handing it the click event instead — and JSON.stringify of a
+      // synthetic event throws on its circular refs, which surfaced to the
+      // caregiver as "Could not reach the server to start checkout" on a
+      // request that was never sent. TypeScript could not catch it:
+      // (plan?: Plan) => void is assignable to () => void.
+      const chosen = planOf(plan);
       const res = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ circle: getCircleId(), plan }),
+        body: JSON.stringify({ circle: getCircleId(), plan: chosen }),
       });
       const data = await res.json();
       if (res.status === 503 && data.error === 'stripe_not_configured') {
