@@ -226,7 +226,7 @@ export const LodgeScreen: React.FC<LodgeScreenProps> = ({
           </p>
           <button
             type="button"
-            onClick={onUnlock}
+            onClick={() => onUnlock()}
             disabled={premiumBusy}
             className="mt-7 inline-flex items-center gap-2 rounded-full bg-[#C8A96A] hover:bg-[#B99855] px-7 py-3.5 font-extrabold text-[#241E18] shadow-lg transition-all active:scale-95 disabled:opacity-60"
           >

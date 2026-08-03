@@ -7,6 +7,7 @@
 // weight of hearing a lost voice again.
 
 import React, { useState } from 'react';
+import { isCustomPersonaVoice } from '../lib/voices';
 import { X, ExternalLink, Check, Info } from 'lucide-react';
 
 interface CloneVoiceModalProps {
@@ -29,7 +30,7 @@ const Step: React.FC<{ n: number; title: string; children: React.ReactNode }> = 
 );
 
 export const CloneVoiceModal: React.FC<CloneVoiceModalProps> = ({ currentValue, onClose, onSave }) => {
-  const preset = ['Sarah', 'Ashley', 'Dennis'].includes(currentValue);
+  const preset = !isCustomPersonaVoice(currentValue);
   const [value, setValue] = useState(preset ? '' : currentValue);
   const trimmed = value.trim();
 

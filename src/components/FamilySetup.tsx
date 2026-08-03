@@ -4,6 +4,7 @@ import { Users, UserPlus, Heart, Sparkles, X, Plus, Trash } from 'lucide-react';
 import type { CaregiverProfile, Memory, CustomFAQ, DailyLog, RoutineItem } from '../types';
 import { DEFAULT_PROFILE } from '../types';
 import { PROFILE_PACKS, type ProfilePack } from '../lib/demoProfiles';
+import { PERSONA_VOICES, personaVoiceChoice, personaVoiceId } from '../lib/voices';
 
 export interface FamilyPackApply {
   profile: CaregiverProfile;
@@ -66,7 +67,7 @@ export default function FamilySetup({ onClose, onApply, firstRun = false }: Fami
   const [caregiverRelationship, setCaregiverRelationship] = useState('');
   const [patientMode, setPatientMode] = useState<'lucid' | 'vivid'>('lucid');
   const [representedPersona, setRepresentedPersona] = useState('');
-  const [representedVoiceId, setRepresentedVoiceId] = useState('Sarah');
+  const [representedVoiceId, setRepresentedVoiceId] = useState(PERSONA_VOICES.female);
   const [seedMemories, setSeedMemories] = useState<SeedMemory[]>([
     { title: '', description: '', relationshipOrEra: '', imageTheme: 'family' },
   ]);
@@ -237,11 +238,22 @@ export default function FamilySetup({ onClose, onApply, firstRun = false }: Fami
                   <Field label="Represented loved one">
                     <input value={representedPersona} onChange={(e) => setRepresentedPersona(e.target.value)} placeholder="e.g. Beth (defaults to caregiver)" className={inputCls} />
                   </Field>
-                  <Field label="Voice">
-                    <select value={representedVoiceId} onChange={(e) => setRepresentedVoiceId(e.target.value)} className={inputCls}>
-                      <option value="Sarah">Sarah (warm female)</option>
-                      <option value="Ashley">Ashley (natural female)</option>
-                      <option value="Dennis">Dennis (calm male)</option>
+                  <Field label="Their voice">
+                    {/* Female or male, not a list of first names. The
+                        caregiver is telling us who this person was, and
+                        "Sarah or Ashley?" is not a question they have any way
+                        to answer. A specific voice can be cloned later in
+                        Settings. */}
+                    <select
+                      value={personaVoiceChoice(representedVoiceId)}
+                      onChange={(e) => {
+                        const id = personaVoiceId(e.target.value as 'female' | 'male');
+                        if (id) setRepresentedVoiceId(id);
+                      }}
+                      className={inputCls}
+                    >
+                      <option value="female">Female voice</option>
+                      <option value="male">Male voice</option>
                     </select>
                   </Field>
                 </div>

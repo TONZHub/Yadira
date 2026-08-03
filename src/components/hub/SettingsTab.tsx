@@ -12,6 +12,12 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { Brain, Heart, Moon, Phone, RefreshCw, Sliders, Sparkles, Sun } from 'lucide-react';
 import { PLANS, PRICE_SHORT, PRICE_BOTH, ANNUAL_SAVING, type Plan } from '../../lib/pricing';
+import {
+  personaVoiceChoice,
+  personaVoiceId,
+  isCustomPersonaVoice,
+  type PersonaVoiceChoice,
+} from '../../lib/voices';
 import { CALLE_REGIONS } from '../../server/calleRegions';
 import { THEMES } from '../../lib/theme';
 import type { CaregiverProfile, CompanionPersonality } from '../../types';
@@ -573,27 +579,23 @@ const SettingsTab: React.FC<SettingsTabProps> = (props) => {
               </div>
 
               <div>
-                <span className="text-[10px] font-bold text-[#5E5D57] block mb-1">Inworld Voice Preset:</span>
+                <span className="text-[10px] font-bold text-[#5E5D57] block mb-1">Their voice:</span>
+                {/* Female, male, or a cloned voice. It used to offer Sarah,
+                    Ashley and Dennis — two of which were the same answer under
+                    different names, and none of which is a question a
+                    caregiver setting up their late wife's voice can answer. */}
                 <select
-                  value={
-                    ['Sarah', 'Ashley', 'Dennis'].includes(representedVoiceId)
-                      ? representedVoiceId
-                      : 'custom'
-                  }
+                  value={personaVoiceChoice(representedVoiceId)}
                   onChange={(e) => {
-                    const val = e.target.value;
-                    if (val !== 'custom') {
-                      setRepresentedVoiceId(val);
-                    } else {
-                      setShowCloneVoice(true);
-                    }
+                    const id = personaVoiceId(e.target.value as PersonaVoiceChoice);
+                    if (id) setRepresentedVoiceId(id);
+                    else setShowCloneVoice(true);
                   }}
                   className="w-full p-2 bg-white border border-[#C4C09E] rounded-xl text-xs font-bold text-[#2C2C2A] focus:ring-1 focus:ring-[#3A5D45]"
                 >
-                  <option value="Sarah">Sarah (Warm Female - Default)</option>
-                  <option value="Ashley">Ashley (Warm Female - Natural)</option>
-                  <option value="Dennis">Dennis (Calm Male - Friendly)</option>
-                  <option value="custom">Custom Inworld Voice ID...</option>
+                  <option value="female">Female voice</option>
+                  <option value="male">Male voice</option>
+                  <option value="custom">Their actual voice (cloned)…</option>
                 </select>
 
                 {/* Clone-a-voice helper — always available, so a caregiver can
@@ -606,7 +608,7 @@ const SettingsTab: React.FC<SettingsTabProps> = (props) => {
                   ✨ Clone a loved one's voice — how?
                 </button>
 
-                {!['Sarah', 'Ashley', 'Dennis'].includes(representedVoiceId) && (
+                {isCustomPersonaVoice(representedVoiceId) && (
                   <div className="mt-1.5 flex items-center space-x-1">
                     <span className="text-[9px] font-mono bg-rose-50 text-rose-700 px-2 py-0.5 rounded border border-rose-100 font-bold block truncate max-w-full">
                       Custom ID: {representedVoiceId}
