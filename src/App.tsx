@@ -674,28 +674,65 @@ function AppContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPatientSession, premium.unlocked, premiumSynced]);
 
+  /**
+   * Turn Caregiver Pro off, everywhere, in one place.
+   *
+   * The stale ids are the point. Leaving customerId behind kept sending the
+   * caregiver to a billing portal for a customer that no longer exists — the
+   * error that surfaced this whole bug — and leaving subscriptionId behind
+   * would keep re-checking a subscription that is gone.
+   */
+  const downgradePremium = (reason: string) => {
+    setPremium({ unlocked: false });
+    toastError('Caregiver Pro ended', reason);
+  };
+
   // Renewal / lapse check: once the paid-through date (plus a 3-day retry
   // grace window) has passed, re-verify the subscription with Stripe and
   // downgrade if it was canceled. Skipped entirely for demo-toggled premium
   // (no subscriptionId) and on patient devices.
   useEffect(() => {
-    if (isPatientSession || !premium.unlocked || !premium.subscriptionId || !premium.currentPeriodEnd) return;
+    if (isPatientSession || !premium.unlocked || !premium.subscriptionId) return;
+
+    // Two triggers, not one.
+    //
+    // The old rule only re-checked after the paid-through date plus a 3-day
+    // retry grace. That is correct for an ordinary lapse, and useless for a
+    // subscription cancelled or deleted mid-period: on an annual plan it
+    // meant keeping Caregiver Pro for up to a year and three days. So there
+    // is now also a daily check, per device, which bounds the gap to a day
+    // without asking Stripe on every page load.
     const GRACE_MS = 3 * 24 * 60 * 60 * 1000;
-    if (Date.now() < premium.currentPeriodEnd + GRACE_MS) return;
+    const DAY_MS = 24 * 60 * 60 * 1000;
+    const lapsed = !!premium.currentPeriodEnd && Date.now() >= premium.currentPeriodEnd + GRACE_MS;
+    const checkedKey = `yadira_${getCircleId()}_sub_checked`;
+    const lastChecked = Number(localStorage.getItem(checkedKey) || 0);
+    const due = Date.now() - lastChecked >= DAY_MS;
+    if (!lapsed && !due) return;
 
     (async () => {
       try {
         const res = await fetch(
-          `/api/stripe/subscription-status?subscription_id=${encodeURIComponent(premium.subscriptionId!)}`,
+          `/api/stripe/subscription-status?subscription_id=${encodeURIComponent(premium.subscriptionId!)}&circle=${encodeURIComponent(getCircleId())}`,
           { headers: authHeaders() }
         );
-        if (!res.ok) return; // network/config hiccup — never downgrade blind
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+
+        // `gone` is Stripe answering, not failing: the subscription has been
+        // deleted. Everything else that is not ok is a hiccup, and a family
+        // must never lose what they paid for over one.
+        if (!res.ok && !data.gone) return;
+
+        localStorage.setItem(checkedKey, String(Date.now()));
+
         if (data.active) {
           setPremium({ ...premium, currentPeriodEnd: data.currentPeriodEnd || premium.currentPeriodEnd });
         } else {
-          setPremium({ ...premium, unlocked: false });
-          toastError('Caregiver Pro ended', 'Your Caregiver Pro subscription is no longer active — the companion stays free for your family. You can re-subscribe any time from the Caregiver Hub.');
+          downgradePremium(
+            data.gone
+              ? 'That subscription no longer exists in billing, so Caregiver Pro has been switched off. The companion stays free for your family.'
+              : 'Your Caregiver Pro subscription is no longer active — the companion stays free for your family. You can re-subscribe any time from the Caregiver Hub.'
+          );
         }
       } catch {
         // Best-effort — try again next visit rather than punishing a family
@@ -753,6 +790,16 @@ function AppContent() {
       const data = await res.json();
       if (res.ok && data.url) {
         window.location.assign(data.url);
+        return;
+      }
+      // The customer was deleted in Stripe. This is exactly how the bug was
+      // found: "Billing portal unavailable — No such customer: cus_..." while
+      // the account still had every paid feature. The error already knew the
+      // subscription was gone; it just was not doing anything about it.
+      if (data.gone) {
+        downgradePremium(
+          'That subscription no longer exists in billing, so Caregiver Pro has been switched off. The companion stays free for your family.'
+        );
         return;
       }
       toastError('Billing portal unavailable', data.error || 'Could not open the billing portal.');
