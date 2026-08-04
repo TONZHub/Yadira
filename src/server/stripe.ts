@@ -28,6 +28,35 @@ const isStripeConfigured = () => {
   return !!key && key.trim() !== '' && key !== 'MY_STRIPE_SECRET_KEY';
 };
 
+/**
+ * A Stripe failure that carries WHY, because two very different things were
+ * being treated as one.
+ *
+ * A network blip, an outage page, a bad key — those mean "ask again later",
+ * and downgrading a paying family over one is unforgivable.
+ *
+ * "No such customer" is not that. It is Stripe answering the question
+ * definitively: there is no subscription here. Collapsing both into a generic
+ * 502 is what let a deleted customer keep Caregiver Pro indefinitely — the
+ * only code path that can downgrade requires a SUCCESSFUL reply saying
+ * inactive, and a deleted subscription never produces one.
+ */
+class StripeError extends Error {
+  constructor(message: string, readonly status?: number, readonly code?: string) {
+    super(message);
+    this.name = 'StripeError';
+  }
+}
+
+/** Stripe telling us the thing is gone, rather than that it could not answer. */
+function isMissingResource(err: any): boolean {
+  if (err instanceof StripeError) {
+    return err.status === 404 || err.code === 'resource_missing';
+  }
+  // Belt and braces: the message is stable across Stripe's resource types.
+  return /no such (customer|subscription|checkout\.session|price)/i.test(String(err?.message || ''));
+}
+
 // Stripe's API takes application/x-www-form-urlencoded bodies with
 // bracket-notation for nested params (line_items[0][price_data][currency]).
 async function stripeRequest(
@@ -58,7 +87,7 @@ async function stripeRequest(
   }
   if (!response.ok) {
     const message = data?.error?.message || `Stripe API error ${response.status}`;
-    throw new Error(message);
+    throw new StripeError(message, response.status, data?.error?.code);
   }
   return data;
 }
@@ -207,6 +236,12 @@ export function registerStripeRoutes(app: express.Express) {
       notePremium(String(sub?.metadata?.circleId || req.query?.circle || ''), state.active);
       res.json(state);
     } catch (err: any) {
+      if (isMissingResource(err)) {
+        // Deleted or never existed. Say so plainly so the client can act on
+        // it, rather than returning a 502 the client is right to ignore.
+        console.warn('[Stripe] subscription-status: resource gone —', err.message || err);
+        return res.json({ active: false, gone: true });
+      }
       console.error('[Stripe] subscription-status failed:', err.message || err);
       res.status(502).json({ error: err.message || 'Failed to fetch subscription status' });
     }
@@ -278,8 +313,20 @@ export function registerStripeRoutes(app: express.Express) {
       });
       res.json({ url: portal.url });
     } catch (err: any) {
+      if (isMissingResource(err)) {
+        console.warn('[Stripe] create-portal-session: customer gone —', err.message || err);
+        return res.status(404).json({
+          error: 'This subscription no longer exists in billing.',
+          gone: true,
+        });
+      }
       console.error('[Stripe] create-portal-session failed:', err.message || err);
       res.status(502).json({ error: err.message || 'Failed to create billing portal session' });
     }
   });
 }
+
+// Test seam. The class and predicate are internal to the billing flow, but
+// the distinction they draw decides whether a paying family keeps what they
+// paid for, so it is asserted rather than trusted. See stripeGone.test.ts.
+export { StripeError as __StripeError, isMissingResource as __isMissingResource };
