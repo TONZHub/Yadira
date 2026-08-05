@@ -20,9 +20,15 @@ export default function SensoryRoomsMenu({
         initial={{ scale: 0.96, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
         onClick={(e) => e.stopPropagation()}
-        className="bg-white max-w-lg w-full rounded-3xl border border-[#E3DFC2] shadow-xl overflow-hidden"
+        // Capped and column-flexed so the list can scroll inside it. With five
+        // rooms this modal is ~1150px tall, and on a 844px phone it was
+        // rendering from y=-153: the "Calming Rooms" heading pushed off the
+        // top, Aurora's swatch clipped, Forest Canopy severed mid-sentence,
+        // and the unlock panel gone entirely — with no scroll to recover any
+        // of it. Measured before and after.
+        className="bg-white max-w-lg w-full rounded-3xl border border-[#E3DFC2] shadow-xl overflow-hidden flex flex-col max-h-[85vh]"
       >
-        <div className="px-6 py-4 border-b border-[#E3DFC2] flex items-center justify-between">
+        <div className="px-6 py-4 border-b border-[#E3DFC2] flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-xl font-bold text-[#2C2C2A]">Calming Rooms</h3>
             <p className="text-xs text-[#7E7D76] mt-0.5">A quiet place to rest the senses.</p>
@@ -32,6 +38,12 @@ export default function SensoryRoomsMenu({
           </button>
         </div>
 
+        {/* The scroll container and the grid are deliberately two elements.
+            Put `flex-1 min-h-0` on the grid itself and it gets a definite
+            height, then compresses its own rows rather than overflowing — the
+            cards render as bare swatches with no names under them. Verified in
+            a browser: it looked worse than the bug it was fixing. */}
+        <div className="overflow-y-auto overscroll-contain flex-1 min-h-0">
         <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
           {SENSORY_ROOMS.map((room) => {
             const locked = room.premium && !isPremium;
@@ -69,9 +81,10 @@ export default function SensoryRoomsMenu({
             );
           })}
         </div>
+        </div>
 
         {!isPremium && (
-          <div className="px-5 pb-5">
+          <div className="px-5 pb-5 pt-1 shrink-0 border-t border-[#EFECDD] bg-white">
             <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4 flex items-start gap-3">
               <div className="p-2 rounded-xl bg-white text-indigo-500 shadow-xs shrink-0">
                 <Sparkles className="w-5 h-5" />
@@ -79,8 +92,12 @@ export default function SensoryRoomsMenu({
               <div>
                 <p className="text-sm font-bold text-indigo-700">Unlock all calming rooms with Yadira Premium</p>
                 <p className="text-xs text-indigo-500 leading-snug mt-0.5">
-                  Rainy Window, Autumn Leaves, and Forest Canopy — plus Beth's real voice and lasting memory.
-                  A caregiver can enable Premium from the Caregiver Hub.
+                  {/* Derived, not written out. The hardcoded version listed
+                      three rooms and silently went stale the moment a fourth
+                      was added. */}
+                  {SENSORY_ROOMS.filter((r) => r.premium).map((r) => r.label).join(', ')} — plus
+                  Beth&rsquo;s real voice and lasting memory. A caregiver can enable Premium from
+                  the Caregiver Hub.
                 </p>
               </div>
             </div>
