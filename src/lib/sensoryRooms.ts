@@ -2,7 +2,7 @@
 // view. Aurora is free (the taste); the rest are Yadira Premium.
 // All are pure canvas + Web Audio: no assets, no API cost, work offline.
 
-export type RoomId = 'aurora' | 'rain' | 'leaves' | 'canopy';
+export type RoomId = 'aurora' | 'rain' | 'leaves' | 'canopy' | 'water';
 
 export interface RoomMeta {
   id: RoomId;
@@ -38,6 +38,14 @@ export const SENSORY_ROOMS: RoomMeta[] = [
     premium: true,
     preview: ['#b5551d', '#e2a33c'],
     emoji: '🍂',
+  },
+  {
+    id: 'water',
+    label: 'Still Water',
+    blurb: 'A quiet pond at dusk. Touch it and the rings spread out from your hand.',
+    premium: true,
+    preview: ['#0d1c24', '#2c5a66'],
+    emoji: '💧',
   },
   {
     id: 'canopy',

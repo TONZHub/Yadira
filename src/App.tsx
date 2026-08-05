@@ -49,7 +49,7 @@ import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
 import { CALLE_REGIONS } from './server/calleRegions';
-import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal, CaregiverTour, tourSeenKey } from './components';
+import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, StillWater, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal, CaregiverTour, tourSeenKey } from './components';
 import type { FamilyPackApply } from './components';
 import type { RoomId } from './lib/sensoryRooms';
 import { AuthProvider, useAuth } from './lib/AuthContext';
@@ -2694,6 +2694,7 @@ function AppContent() {
       {premiumRoom === 'rain' && <RainyWindow onExit={() => setPremiumRoom(null)} />}
       {premiumRoom === 'leaves' && <AutumnLeaves onExit={() => setPremiumRoom(null)} />}
       {premiumRoom === 'canopy' && <ForestCanopy onExit={() => setPremiumRoom(null)} />}
+      {premiumRoom === 'water' && <StillWater onExit={() => setPremiumRoom(null)} />}
 
       {/* Call Mode full-screen overlay */}
       {isCallActive && (
