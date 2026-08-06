@@ -31,7 +31,7 @@ const goal = buildLucidityCallGoal(req);
 describe('it says nothing until it knows who answered', () => {
   test('identity is confirmed before Eleanor is named', () => {
     const ask = goal.indexOf('Am I speaking with');
-    const name = goal.indexOf('Nothing is wrong');
+    const name = goal.indexOf('Eleanor is safe');
     assert.ok(ask > -1 && ask < name);
   });
 
@@ -53,7 +53,11 @@ describe('it says nothing until it knows who answered', () => {
 describe('it does not promise the window will last', () => {
   test('the news is anchored to now', () => {
     assert.match(goal, /clear moment right now/i);
-    assert.match(goal, /now is the time/i);
+    // "would be the time", not "is the time". This call asks nothing and
+    // instructs nothing — it hands over a fact and gets off the phone. The
+    // conditional is doing that work.
+    assert.match(goal, /now would be the time/i);
+    assert.match(goal, /don't usually last long/i);
   });
 
   test('and it is explicitly forbidden from promising more', () => {
@@ -91,10 +95,28 @@ describe('it is not a doctor and it is not alarming', () => {
     assert.match(goal, /Say nothing about their prognosis/i);
   });
 
-  test('nothing is wrong is said first, because this number also rings for the help button', () => {
+  test('the fear comes off the table first, because this number also rings for the help button', () => {
+    assert.match(goal, /Eleanor is safe, and nobody is hurt/);
     assert.match(goal, /also rings for Eleanor's help button/);
     assert.match(goal, /braced for bad news/i);
     assert.match(goal, /Do not sound alarmed/i);
+  });
+
+  test('it does NOT say "nothing is wrong", and knows why', () => {
+    // The help call and the briefing call both open with that phrase, where
+    // it means "no action needed, you can breathe". This call is asking
+    // somebody to move. Saying it and then "now is the time" is a
+    // contradiction in the same breath — and it teaches a caregiver that the
+    // phrase can precede urgency. One of the times they stop believing it is
+    // the call where it is true.
+    //
+    // The reassurance still has to come first; it just has to rule out the
+    // EMERGENCY without ruling out the NEWS.
+    const reassurance = goal.indexOf('Eleanor is safe, and nobody is hurt');
+    const news = goal.indexOf('very clear moment right now');
+    assert.ok(reassurance > -1 && reassurance < news, 'safety must precede the news');
+    assert.match(goal, /Do NOT say "nothing is wrong"/);
+    assert.match(goal, /Rule out the EMERGENCY, not the NEWS/);
   });
 
   test('works without a caregiver name', () => {
