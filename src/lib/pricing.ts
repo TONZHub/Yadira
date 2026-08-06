@@ -81,3 +81,42 @@ export const PRICE_SHORT = PLANS.monthly.label;
 
 /** Savings copy for the annual plan, derived rather than written down. */
 export const ANNUAL_SAVING = `$${((PRICE_MONTHLY_CENTS * 12 - PRICE_ANNUAL_CENTS) / 100).toFixed(2)}`;
+
+// ---- The free trial ----
+//
+// Seven days, not three. Cost was never the constraint — at a measured
+// $0.871/day a trial start risks $6.10, which is nothing against a $39.99
+// month. The constraint is SETUP: a caregiver has to complete the family
+// profile, write real memories, save the phone number the help button rings,
+// and hand a tablet over. Three days is barely onboarding, and the failure
+// mode is not "they didn't like it" — it is being charged before they ever
+// finished, which costs a refund and a review rather than a customer.
+//
+// Env-configurable so it can be tuned or switched off (0) without a deploy of
+// new code. Every piece of copy derives from this number, so the buttons can
+// never promise a trial that is not configured.
+export const TRIAL_DAYS = (() => {
+  const raw = Number(
+    typeof process !== 'undefined' ? process.env?.VITE_TRIAL_DAYS ?? process.env?.TRIAL_DAYS : undefined
+  );
+  return Number.isFinite(raw) && raw >= 0 ? Math.floor(raw) : 7;
+})();
+
+export function hasTrial(): boolean {
+  return TRIAL_DAYS > 0;
+}
+
+/** "7-day free trial" — or empty, when trials are off. */
+export const TRIAL_LABEL = hasTrial() ? `${TRIAL_DAYS}-day free trial` : '';
+
+/**
+ * What a trial deliberately does NOT include.
+ *
+ * The weekly email stays in: it costs a fraction of a cent, it arrives on its
+ * own, and a trial where nothing ever turns up is three days of poking around
+ * followed by a charge.
+ *
+ * The briefing CALL stays out: every one is a real, billed CALL-E call, and
+ * it is the single feature a trial could be farmed for.
+ */
+export const TRIAL_EXCLUDES_BRIEFING_CALL = true;

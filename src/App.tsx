@@ -44,7 +44,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import type { Message, Memory, CustomFAQ, DailyLog, RoutineItem, PersonaFile, SessionMoment, MoodCheckIn, GalleryPhoto } from './types';
 import { DEFAULT_PROFILE, DEFAULT_PERSONA_FILE } from './types';
 import { useStoreList, useStoreDoc } from './lib/useStore';
-import { PRICE_SHORT, planOf, type Plan } from './lib/pricing';
+import { PRICE_SHORT, planOf, TRIAL_LABEL, type Plan } from './lib/pricing';
 import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
@@ -562,6 +562,8 @@ function AppContent() {
   // STRIPE_SECRET_KEY isn't configured on the server.
   const [premium, setPremium, premiumSynced] = useStoreDoc<{
     unlocked: boolean;
+    /** Premium via a free trial rather than a paid subscription. */
+    trialing?: boolean;
     subscriptionId?: string;
     customerId?: string;
     currentPeriodEnd?: number; // ms epoch, from Stripe
@@ -625,6 +627,7 @@ function AppContent() {
         if (res.ok && data.active) {
           setPremium({
             unlocked: true,
+            trialing: !!data.trialing,
             subscriptionId: data.subscriptionId || undefined,
             customerId: data.customerId || undefined,
             currentPeriodEnd: data.currentPeriodEnd || undefined,
@@ -726,7 +729,11 @@ function AppContent() {
         localStorage.setItem(checkedKey, String(Date.now()));
 
         if (data.active) {
-          setPremium({ ...premium, currentPeriodEnd: data.currentPeriodEnd || premium.currentPeriodEnd });
+          setPremium({
+            ...premium,
+            trialing: !!data.trialing,
+            currentPeriodEnd: data.currentPeriodEnd || premium.currentPeriodEnd,
+          });
         } else {
           downgradePremium(
             data.gone
@@ -2334,6 +2341,16 @@ function AppContent() {
     }
     if (!isPremium) {
       toastError('Caregiver Pro', 'Yadira calling you with the week is part of Caregiver Pro.');
+      return;
+    }
+    // Said here as well as enforced on the server. A caregiver pressing a
+    // button and being refused by a 402 has been told they were allowed to
+    // press it; better to explain before the press than after.
+    if (premium.trialing) {
+      toastError(
+        'Not in the trial',
+        `Yadira calling you with the week starts when your ${TRIAL_LABEL || 'trial'} ends. The weekly email is on already — check your inbox.`
+      );
       return;
     }
     setBriefingCalling(true);

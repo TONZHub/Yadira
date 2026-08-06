@@ -11,7 +11,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { Brain, Heart, Moon, Phone, RefreshCw, Sliders, Sparkles, Sun } from 'lucide-react';
-import { PLANS, PRICE_SHORT, PRICE_BOTH, ANNUAL_SAVING, type Plan } from '../../lib/pricing';
+import { PLANS, PRICE_SHORT, PRICE_BOTH, ANNUAL_SAVING, TRIAL_DAYS, TRIAL_LABEL, hasTrial, type Plan } from '../../lib/pricing';
 import {
   personaVoiceChoice,
   personaVoiceId,
@@ -52,6 +52,8 @@ export interface SettingsTabProps {
   isPremium: boolean;
   premium: {
     unlocked: boolean;
+    /** Premium via a free trial rather than a paid subscription. */
+    trialing?: boolean;
     subscriptionId?: string;
     customerId?: string;
     currentPeriodEnd?: number;
@@ -438,6 +440,12 @@ const SettingsTab: React.FC<SettingsTabProps> = (props) => {
               </span>
               {isPremium ? (
                 <span className="text-[10px] text-[#7E7D76] leading-tight mt-1 block">
+                  {premium.trialing && (
+                    <b className="block text-[#3A5D45] mb-0.5">
+                      {TRIAL_LABEL} — Yadira calling you with the week starts when it ends. The
+                      weekly email is on already.
+                    </b>
+                  )}
                   Active — the help button rings your phone, plus unlimited AI care reports
                   (routines &amp; clinical insights) for this caregiver. The companion itself is
                   free for your family, always.
@@ -507,7 +515,12 @@ const SettingsTab: React.FC<SettingsTabProps> = (props) => {
                   title={`Secure checkout via Stripe — ${PLANS.monthly.label}, cancel anytime`}
                   className="py-2.5 px-2 rounded-xl text-xs font-bold bg-[#3A5D45] text-white hover:bg-[#2B4633] shadow-xs transition-all active:scale-95 disabled:opacity-60 disabled:pointer-events-none"
                 >
-                  {premiumBusy ? 'One moment…' : PLANS.monthly.label}
+                  {premiumBusy ? 'One moment…' : hasTrial() ? 'Start free trial' : PLANS.monthly.label}
+                  {hasTrial() && !premiumBusy && (
+                    <span className="block text-[9px] font-semibold opacity-80 leading-tight">
+                      then {PLANS.monthly.label}
+                    </span>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -524,7 +537,9 @@ const SettingsTab: React.FC<SettingsTabProps> = (props) => {
                 </button>
               </div>
               <p className="text-[10px] text-[#7E7D76] text-center leading-snug">
-                Secure checkout via Stripe. Cancel anytime.
+                {hasTrial()
+                  ? `Free for ${TRIAL_DAYS} days, then the plan you picked. Card required; cancel any time before it ends and you are not charged.`
+                  : 'Secure checkout via Stripe. Cancel anytime.'}
               </p>
             </div>
           ) : (

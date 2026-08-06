@@ -21,6 +21,8 @@
 interface Known {
   day: string;
   pro: boolean;
+  /** On a free trial — premium, but not entitled to the billed briefing call. */
+  trialing: boolean;
 }
 
 const known = new Map<string, Known>();
@@ -30,9 +32,9 @@ function today(now: number): string {
 }
 
 /** Record what a Stripe call just proved about this circle. */
-export function notePremium(circle: string, pro: boolean, now = Date.now()): void {
+export function notePremium(circle: string, pro: boolean, trialing = false, now = Date.now()): void {
   if (!circle) return;
-  known.set(circle, { day: today(now), pro });
+  known.set(circle, { day: today(now), pro, trialing });
 }
 
 /**
@@ -52,4 +54,20 @@ export function knownPremium(circle: string, now = Date.now()): boolean | undefi
 /** Test seam — the registry is process-wide. */
 export function __resetPremiumRegistry(): void {
   known.clear();
+}
+
+/**
+ * Is this circle on a free trial rather than a paid subscription?
+ *
+ * `undefined` means we have not established it today — which the caller must
+ * read as "not trialing", because the alternative is refusing a paying
+ * family the feature they bought whenever this process has just restarted.
+ * Erring toward serving the customer costs at most one CALL-E call; erring
+ * the other way is a paying caregiver told they cannot have what they paid
+ * for.
+ */
+export function isTrialing(circle: string, now = Date.now()): boolean {
+  const entry = known.get(circle);
+  if (!entry || entry.day !== today(now)) return false;
+  return entry.trialing;
 }

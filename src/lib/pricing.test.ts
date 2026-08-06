@@ -11,7 +11,17 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { planOf, isPlan, PLANS, PRICE_MONTHLY_CENTS, PRICE_ANNUAL_CENTS } from './pricing';
+import {
+  planOf,
+  isPlan,
+  PLANS,
+  PRICE_MONTHLY_CENTS,
+  PRICE_ANNUAL_CENTS,
+  TRIAL_DAYS,
+  TRIAL_LABEL,
+  hasTrial,
+  TRIAL_EXCLUDES_BRIEFING_CALL,
+} from './pricing';
 
 describe('the plan is normalised, never trusted', () => {
   test('the two real plans pass through', () => {
@@ -65,5 +75,30 @@ describe('the prices are the ones that were decided', () => {
     assert.equal(PLANS.annual.interval, 'year');
     assert.match(PLANS.monthly.label, /month/);
     assert.match(PLANS.annual.label, /year/);
+  });
+});
+
+describe('the free trial', () => {
+  test('seven days by default, and copy derived from it', () => {
+    // Every string that mentions the trial comes off this number, so a
+    // button can never promise a trial that is not configured.
+    assert.equal(TRIAL_DAYS, 7);
+    assert.equal(hasTrial(), true);
+    assert.match(TRIAL_LABEL, new RegExp(`^${TRIAL_DAYS}-day free trial$`));
+  });
+
+  test('the trial is bounded by what it costs to serve', () => {
+    // Measured COGS is $6.10/week, so $0.871/day. Seven days risks $6.10
+    // against a $39.99 month — the constraint on length was never money, it
+    // was leaving enough time to finish setup before the card is charged.
+    const exposurePerStart = TRIAL_DAYS * 0.871;
+    assert.ok(exposurePerStart < PRICE_MONTHLY_CENTS / 100, 'a trial must cost less than the month it sells');
+  });
+
+  test('the briefing call is excluded, the weekly email is not', () => {
+    // The call is billed per call and is the one thing a trial could be
+    // farmed for. The email costs a fraction of a cent, and a trial where
+    // nothing ever arrives is a week of silence followed by a charge.
+    assert.equal(TRIAL_EXCLUDES_BRIEFING_CALL, true);
   });
 });
