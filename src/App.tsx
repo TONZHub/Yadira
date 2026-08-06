@@ -49,9 +49,10 @@ import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
 import { CALLE_REGIONS } from './server/calleRegions';
-import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, StillWater, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal, CaregiverTour, tourSeenKey } from './components';
+import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, StillWater, ClubMenu, MemoryPairs, HattiesTune, SlidingNumbers, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal, CaregiverTour, tourSeenKey } from './components';
 import type { FamilyPackApply } from './components';
 import type { RoomId } from './lib/sensoryRooms';
+import type { GameId } from './lib/hattieClub';
 import { AuthProvider, useAuth } from './lib/AuthContext';
 import { devToken, setDevToken, clearDevToken, registerTap, type TapState } from './lib/devMode';
 import { INITIAL_LOGS, INITIAL_MEMORIES, INITIAL_FAQS, DEFAULT_ROUTINE } from './lib/initialData';
@@ -820,6 +821,12 @@ function AppContent() {
   // Calming rooms — Aurora (free) plus the premium sensory rooms.
   const [showRoomsMenu, setShowRoomsMenu] = useState(false);
   const [premiumRoom, setPremiumRoom] = useState<RoomId | null>(null);
+
+  // Hattie's Club — the games. Free, because they cost nothing to run and
+  // charging for the one part of the app that looks like fun would be
+  // charging for the cheapest thing in it.
+  const [showClubMenu, setShowClubMenu] = useState(false);
+  const [clubGame, setClubGame] = useState<GameId | null>(null);
 
   // ---- Camp: Hattie's daily check-in (patient-facing) ----
   // The patient meets Hattie first, taps how they're feeling, then "leaves
@@ -2525,6 +2532,19 @@ function AppContent() {
             </button>
           )}
 
+          {/* Hattie's Club — patient side, beside the calming rooms. Both are
+              "somewhere else to be", which is why they sit together. */}
+          {activeTab === 'patient' && (
+            <button
+              id="btn-hatties-club"
+              onClick={() => setShowClubMenu(true)}
+              className="p-2 sm:p-2.5 rounded-xl border border-[#E3DFC2] bg-white text-[#A6A27B] hover:text-[#3A5D45] hover:border-[#CEDFCF] transition-all text-lg leading-none"
+              title="Hattie's Club — a few games, nothing to lose"
+            >
+              <span aria-hidden="true">🦛</span>
+            </button>
+          )}
+
           {/* Larger text — device-wide, on every screen. Shown on both the
               patient view and the Caregiver Hub. */}
           <button
@@ -2712,6 +2732,22 @@ function AppContent() {
       {premiumRoom === 'leaves' && <AutumnLeaves onExit={() => setPremiumRoom(null)} />}
       {premiumRoom === 'canopy' && <ForestCanopy onExit={() => setPremiumRoom(null)} />}
       {premiumRoom === 'water' && <StillWater onExit={() => setPremiumRoom(null)} />}
+
+      {showClubMenu && (
+        <ClubMenu
+          onClose={() => setShowClubMenu(false)}
+          onSelect={(id) => { setClubGame(id); setShowClubMenu(false); }}
+        />
+      )}
+      {clubGame === 'pairs' && (
+        <MemoryPairs
+          onExit={() => setClubGame(null)}
+          // Their own album, so a match is a memory rather than a shape.
+          photos={galleryPhotos.map((p) => p.dataUrl).filter(Boolean)}
+        />
+      )}
+      {clubGame === 'simon' && <HattiesTune onExit={() => setClubGame(null)} />}
+      {clubGame === 'tiles' && <SlidingNumbers onExit={() => setClubGame(null)} />}
 
       {/* Call Mode full-screen overlay */}
       {isCallActive && (

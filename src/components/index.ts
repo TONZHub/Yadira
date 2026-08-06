@@ -21,3 +21,7 @@ export { default as Campfire } from './Campfire';
 export { default as CloneVoiceModal } from './CloneVoiceModal';
 
 export { default as CaregiverTour, tourSeenKey } from './CaregiverTour';
+export { default as ClubMenu } from './club/ClubMenu';
+export { default as MemoryPairs } from './club/MemoryPairs';
+export { default as HattiesTune } from './club/HattiesTune';
+export { default as SlidingNumbers } from './club/SlidingNumbers';
