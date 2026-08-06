@@ -1088,7 +1088,18 @@ function AppContent() {
     fetch('/api/lucidity-alert', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ active, circle: getCircleId() }),
+      // The phone details travel with the alert so the server can also RING
+      // the caregiver. A clear moment is short, and a banner waits on a
+      // screen nobody is watching until the thing it announced has gone.
+      body: JSON.stringify({
+        active,
+        circle: getCircleId(),
+        toPhone: helpCall.escalationPhone,
+        region: helpCall.region,
+        patientName,
+        caregiverName: profile.caregiverName,
+        isPremium,
+      }),
     }).catch((err) => console.warn('[Yadira] lucidity-alert push failed', err));
   };
 

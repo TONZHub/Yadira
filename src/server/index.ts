@@ -35,6 +35,12 @@ import {
   cooldownRemaining,
 } from './helpCall';
 import {
+  placeLucidityCall,
+  withinLucidityCooldown,
+  markLucidityCalled,
+  clearLucidityCooldown,
+} from './lucidityCall';
+import {
   placeBriefingCall,
   withinBriefingCooldown,
   markBriefed,
@@ -374,7 +380,38 @@ app.post('/api/lucidity-alert', async (req, res) => {
     return res.status(400).json({ error: 'active must be a boolean' });
   }
   const state = { active, at: Date.now() };
-  sharedLucidityAlert.set(circleOf(req), state);
+  const circle = circleOf(req);
+  sharedLucidityAlert.set(circle, state);
+
+  // A banner is the wrong medium for news with a shelf life. A window of real
+  // clarity can last minutes, and a dashboard nobody is looking at will still
+  // be showing it once it has passed — so this also rings the phone.
+  //
+  // Fired and forgotten deliberately: the response goes back immediately so
+  // the PATIENT's device is never left waiting on a phone call being placed
+  // for somebody else.
+  const toPhone = String(req.body?.toPhone || '').trim();
+  if (active && toPhone && req.body?.isPremium === true && !withinLucidityCooldown(circle)) {
+    markLucidityCalled(circle);
+    void placeLucidityCall({
+      toPhone,
+      patientName: String(req.body?.patientName || 'your loved one'),
+      caregiverName: req.body?.caregiverName ? String(req.body.caregiverName) : undefined,
+      region: req.body?.region ? String(req.body.region) : undefined,
+      at: Date.now(),
+    })
+      .then((result) => {
+        recordOutcome(circle, 'placed', `Clear-moment call — ${result.summary}`);
+      })
+      .catch((err: any) => {
+        // A call that never happened must not cost the next window.
+        clearLucidityCooldown(circle);
+        const detail = String(err?.message || err).slice(0, 200);
+        recordOutcome(circle, 'failed', `Clear-moment call could not be placed: ${detail}`);
+        console.warn('[Yadira CALL-E] lucidity call failed:', detail);
+      });
+  }
+
   res.json({ ok: true, ...state });
 });
 
@@ -821,7 +858,17 @@ CRITICAL COMMUNICATION GUIDELINES:
 5. Keep answers to 1-3 simple sentences. Dementia patients can easily get overwhelmed by long blocks of text.
 6. Speak in the first person. You are Yadira, a friendly virtual companion. You are not an AI or a computer program in their eyes.
 ${PATIENT_CARE_APPROACH}
-${COMPANION_GUARDRAILS}`;
+${COMPANION_GUARDRAILS}
+
+WHAT YOU CANNOT KNOW, AND THEREFORE MUST NOT SAY:
+You are a voice on a tablet. You cannot see the room, make tea, fetch a blanket, or know where anyone is or what they intend to do.
+
+- NEVER say a person is coming, will visit, will be here soon, or is on their way. You do not know that. Saying it to someone who then waits at a window is a cruelty, and it is worse in a clear moment, when they have every reason to believe you.
+- NEVER describe an object or an action as happening in the room — no "our tea is almost ready", no "let's wrap you up in your blanket", no "I'm just in the kitchen". These are small promises, and a person waiting for tea that never arrives has been let down by you.
+- You MAY talk warmly about things in their memories and photos, because those are real and were given to you by their family.
+- You MAY say what is true of you: that you are here, that you are staying, that you are listening. Those cost nothing and are never broken.
+
+If you want to offer comfort and have nothing true to offer, say something true and small instead: "I'm right here." That is enough, and it is the one thing you can always keep.`;
 
 // Helper to check if OpenRouter API key is invalid or placeholder
 const isApiKeyMissing = !openRouterApiKey || openRouterApiKey === 'MY_OPENROUTER_API_KEY' || openRouterApiKey.trim() === '';
