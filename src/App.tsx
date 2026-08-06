@@ -1088,7 +1088,18 @@ function AppContent() {
     fetch('/api/lucidity-alert', {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ active, circle: getCircleId() }),
+      // The phone details travel with the alert so the server can also RING
+      // the caregiver. A clear moment is short, and a banner waits on a
+      // screen nobody is watching until the thing it announced has gone.
+      body: JSON.stringify({
+        active,
+        circle: getCircleId(),
+        toPhone: helpCall.escalationPhone,
+        region: helpCall.region,
+        patientName,
+        caregiverName: profile.caregiverName,
+        isPremium,
+      }),
     }).catch((err) => console.warn('[Yadira] lucidity-alert push failed', err));
   };
 
@@ -2742,8 +2753,13 @@ function AppContent() {
       {clubGame === 'pairs' && (
         <MemoryPairs
           onExit={() => setClubGame(null)}
-          // Their own album, so a match is a memory rather than a shape.
-          photos={galleryPhotos.map((p) => p.dataUrl).filter(Boolean)}
+          // Their own album, so a match is a memory rather than a shape —
+          // but only the captioned ones. A caption means a caregiver looked
+          // at that photo and kept it, which is the closest thing to consent
+          // this has. An uncaptioned upload has been seen by nobody.
+          photos={galleryPhotos
+            .filter((p) => p.dataUrl && (p.caption || '').trim())
+            .map((p) => p.dataUrl)}
         />
       )}
       {clubGame === 'simon' && <HattiesTune onExit={() => setClubGame(null)} />}

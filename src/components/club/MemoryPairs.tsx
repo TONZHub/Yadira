@@ -12,6 +12,12 @@ import { delightLine } from '../../lib/hattieClub';
 // Six pairs, not eight or ten. Twelve cards fits a tablet without shrinking
 // them, and a board that takes ten minutes stops being pleasant.
 //
+// Only CAPTIONED photos are dealt (the caller filters). A caption means a
+// caregiver looked at that photo and kept it. An album can also hold a test
+// upload, a medical photo, or a picture of someone who has died — things a
+// person browses deliberately but would not choose to have flipped at them
+// at random. In the album you go looking; here it arrives.
+//
 // There is no move counter, no timer, and no way to lose. A wrong pair turns
 // back over and that is all that happens. The board simply finishes, and
 // finishing is the only outcome it has.
@@ -125,7 +131,16 @@ export default function MemoryPairs({
             >
               {showing ? (
                 card.isPhoto ? (
-                  <img src={card.face} alt="" className="w-full h-full object-cover" />
+                  <img
+                    src={card.face}
+                    alt=""
+                    // contain, not cover. Cover crops to a square and scales
+                    // to fill, which turns any face in a photo into a
+                    // close-up pressed against the frame — a bushbaby at
+                    // maximum eye, in the case that found this. The album
+                    // shows these whole; the game should not zoom them.
+                    className="w-full h-full object-contain p-1"
+                  />
                 ) : (
                   <span className="text-4xl">{card.face}</span>
                 )
