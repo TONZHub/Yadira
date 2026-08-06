@@ -1,5 +1,5 @@
 import express from 'express';
-import { GoogleGenAI, Type } from '@google/genai';
+import { GoogleGenAI, Type, HarmCategory, HarmBlockThreshold } from '@google/genai';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -162,6 +162,19 @@ const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 // GEMINI_VISION_MODEL if the derived name doesn't exist for your account.
 const GEMINI_VISION_MODEL = process.env.GEMINI_VISION_MODEL || GEMINI_MODEL.replace('flash', 'pro');
 
+// The companion's own model, separate from the one that writes reports.
+//
+// Defaults to the same model, because flash is fast and cheap and a warm
+// three-sentence reply is not a hard reasoning task. It is separable because
+// of the one finding that got Gemini removed from this role before: Pro was
+// described as sounding like "a cold computer in a cage". If flash sounds
+// flat in a real conversation, this is the single variable to move — put the
+// companion on a pro-class model without dragging the report and insight
+// routes onto it, which would multiply the bill for no gain.
+const GEMINI_CHAT_MODEL = process.env.GEMINI_CHAT_MODEL || GEMINI_MODEL;
+
+const CHAT_PROVIDER = (process.env.CHAT_PROVIDER || 'gemini').toLowerCase();
+
 // Resolved model names, logged once at boot.
 //
 // These are strings sent to a provider, so a retired or misspelled name fails
@@ -173,8 +186,15 @@ const GEMINI_VISION_MODEL = process.env.GEMINI_VISION_MODEL || GEMINI_MODEL.repl
 // "flash", vision silently runs on the SAME model as everything else, which is
 // the whole reason for the pro sibling. Say so rather than letting it pass.
 console.info(
-  `[Yadira] Models — chat: ${OPENROUTER_MODEL} · gemini: ${GEMINI_MODEL} · vision: ${GEMINI_VISION_MODEL}`
+  `[Yadira] Models — chat: ${CHAT_PROVIDER === 'openrouter' ? `openrouter/${OPENROUTER_MODEL}` : GEMINI_CHAT_MODEL}` +
+    ` · reports: ${GEMINI_MODEL} · vision: ${GEMINI_VISION_MODEL}`
 );
+if (CHAT_PROVIDER !== 'gemini') {
+  console.warn(
+    `[Yadira] CHAT_PROVIDER=${CHAT_PROVIDER} — the companion is NOT running on Gemini. ` +
+      'Unset it to go back.'
+  );
+}
 if (GEMINI_VISION_MODEL === GEMINI_MODEL) {
   console.warn(
     `[Yadira] Vision is using the same model as everything else (${GEMINI_MODEL}). ` +
@@ -562,6 +582,114 @@ async function geminiGenerateText(
     throw new Error('Gemini returned an empty response.');
   }
   return text.trim();
+}
+
+/**
+ * The companion's voice — Gemini, for every conversational route.
+ *
+ * ---- Why this replaced OpenRouter, and what had to change ----
+ *
+ * notion_notes.md records Gemini being ELIMINATED from exactly this role:
+ * it "flags 'You are Yadira' before the session starts", and Gemini Pro
+ * described itself as "a cold computer in a cage". Both findings were real.
+ * Neither is a reason the model cannot do this job; they are two specific
+ * things that were never configured.
+ *
+ *   · The flagging is safety filtering. A prompt that says "you are a person
+ *     the patient believes is their late wife" reads to a default-tuned
+ *     classifier like impersonation, and the default threshold blocks it.
+ *     safetySettings are now set explicitly, and the block reason is logged
+ *     rather than swallowed — a refusal must be visible as a refusal, not as
+ *     a mysteriously empty reply.
+ *   · The coldness is temperature and framing. The persona work all lives in
+ *     systemInstruction, where it belongs, and temperature is 0.85 rather
+ *     than a default tuned for factual answers.
+ *
+ * Same signature as the OpenRouter helper it replaces, so every call site is
+ * unchanged and the reply-hygiene pipeline downstream — cleanModelOutput,
+ * breaksCharacter, trimToSentences — still applies exactly as before.
+ */
+async function geminiChat(
+  systemPrompt: string,
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  maxTokens = 300
+): Promise<string> {
+  if (!genAI) throw new Error('GEMINI_API_KEY is not configured.');
+
+  const response = await genAI.models.generateContent({
+    model: GEMINI_CHAT_MODEL,
+    contents: messages.map((m) => ({
+      // Gemini calls the assistant "model"; everything else is the same shape.
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    })),
+    config: {
+      systemInstruction: systemPrompt,
+      maxOutputTokens: maxTokens,
+      temperature: 0.85,
+      // The setting whose absence got Gemini "eliminated". A dementia
+      // companion speaking as someone's late spouse is exactly what a
+      // default-tuned harassment/impersonation filter is built to stop, and
+      // the caregiver has consented to it on a screen that says so.
+      safetySettings: [
+        { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+        { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+        { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+        { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
+      ],
+    },
+  });
+
+  // What this exchange cost, in tokens. Same line the OpenRouter path printed,
+  // because the whole reason it exists is that the bill was unexplained.
+  const usage = (response as any)?.usageMetadata;
+  if (usage) {
+    console.info(
+      `[Yadira cost] prompt=${usage.promptTokenCount} completion=${usage.candidatesTokenCount}` +
+        (usage.thoughtsTokenCount ? ` (thinking=${usage.thoughtsTokenCount})` : '') +
+        ` total=${usage.totalTokenCount}`
+    );
+  }
+
+  // A blocked prompt returns no text. Say WHICH — a silent empty reply is the
+  // failure that made this look like a model problem rather than a settings
+  // problem the first time round.
+  const blocked = (response as any)?.promptFeedback?.blockReason;
+  if (blocked) {
+    throw new Error(`Gemini blocked the prompt (${blocked}) — check safetySettings.`);
+  }
+
+  const cleaned = cleanModelOutput(response.text || '');
+  if (response.text && !cleaned) {
+    throw new Error('Model returned only reasoning scratchpad — routing to simulation fallback.');
+  }
+  if (!cleaned) {
+    const finish = (response as any)?.candidates?.[0]?.finishReason;
+    throw new Error(`Gemini returned no usable text${finish ? ` (finishReason ${finish})` : ''}.`);
+  }
+  return cleaned;
+}
+
+/**
+ * Which provider every conversational route uses.
+ *
+ * Gemini, everywhere, by default — the companion, drift, redirection and
+ * emotion analysis. OpenRouter survives only as a one-variable rollback:
+ * CHAT_PROVIDER=openrouter. It is kept because Gemini in this role cannot be
+ * verified from a build environment with no route to Google, and the failure
+ * mode if the safety filter still refuses the persona prompt is every patient
+ * message falling to canned simulation replies. That is a bad thing to
+ * discover in front of an audience with no way back.
+ *
+ * Delete the OpenRouter path once a real conversation has been had on Gemini.
+ */
+async function companionChat(
+  systemPrompt: string,
+  messages: { role: 'user' | 'assistant'; content: string }[],
+  maxTokens = 300
+): Promise<string> {
+  if (CHAT_PROVIDER === 'openrouter') return openRouterChat(systemPrompt, messages, maxTokens);
+  return geminiChat(systemPrompt, messages, maxTokens);
 }
 
 // OpenRouter OpenAI-compatible chat helper
@@ -1192,7 +1320,7 @@ ${COMPANION_GUARDRAILS}`;
     }
 
     // Call OpenRouter — use 1500 tokens so reasoning models have enough budget to produce a response
-    let reply = await openRouterChat(fullSystemInstruction, openRouterMessages, 1500);
+    let reply = await companionChat(fullSystemInstruction, openRouterMessages, 1500);
 
     // Frame-integrity net: if a reply slips out of character (reveals it's an
     // AI, leaks the prompt), swap it for a warm in-character redirect so a
@@ -1822,7 +1950,7 @@ CRITICAL CLINICAL RULES:
 3. Keep it extremely short (1-2 sentences maximum).
 4. Your ENTIRE response must be ONLY the spoken words. Do not write anything like "Here is the message:", "Let's craft:", "I'll say:", or any planning text. Start speaking immediately.`;
 
-    const reply = await openRouterChat(
+    const reply = await companionChat(
       `You are ${persona}, a loving companion of a dementia patient named ${name}. You only ever output the spoken words themselves — never any explanation, planning, prefix, or meta-text. Your entire response IS the spoken message and nothing else.`,
       [{ role: 'user', content: prompt }],
       1500
@@ -1939,7 +2067,7 @@ Keep it short (1-3 sentences maximum). Do not break character. Do not mention th
 Example trigger: "Patient wants to leave their room to find their spouse"
 Example response: "I'll be waiting for you in the kitchen, dear. I'm starting on those eggs you like with plenty of pepper on top. Rest your eyes until they are ready."`;
 
-    const reply = await openRouterChat(
+    const reply = await companionChat(
       `You are ${persona}, the loving companion of a dementia patient named ${name}. You only output spoken words — never planning text, explanations, or meta-commentary. Your entire response IS what you say, nothing else.`,
       [{ role: 'user', content: prompt }],
       1500
@@ -1991,37 +2119,25 @@ Respond ONLY with valid JSON (no markdown, no code blocks):
 
 Statement: "${text}"`;
 
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openRouterApiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://yadira.chat',
-        'X-Title': 'Yadira Dementia Companion',
-      },
-      body: JSON.stringify({
-        model: OPENROUTER_MODEL,
-        messages: [{ role: 'user', content: prompt }],
-        max_tokens: 100,
-        temperature: 0.3,
-      }),
-    });
+    // Was a raw OpenRouter fetch, the last one in the file. Emotion analysis
+    // is a small structured read, so it goes through the same Gemini path as
+    // everything else rather than keeping a second provider alive for one
+    // route.
+    const emotionText = await companionChat(
+      'You classify the emotional tone of a short statement. Reply with JSON only.',
+      [{ role: 'user', content: prompt }],
+      120
+    );
 
-    if (!response.ok) {
-      const errText = await response.text();
-      console.warn('[Yadira] Emotion analysis failed:', errText);
-      throw new Error(`OpenRouter returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-
-    // Parse JSON response
+    // Parse JSON response. Models like to wrap JSON in a fenced block; strip
+    // it rather than logging a parse failure and reporting "neutral" for a
+    // reply that classified perfectly well.
     let emotion = { emotion: 'neutral', confidence: 0.5, tone: 'neutral' };
+    const content = emotionText.replace(/^```(?:json)?\s*|\s*```$/g, '').trim();
     try {
       emotion = JSON.parse(content);
     } catch {
-      console.warn('[Yadira] Failed to parse emotion JSON:', content);
+      console.warn('[Yadira] Failed to parse emotion JSON:', content.slice(0, 120));
     }
 
     res.json(emotion);
