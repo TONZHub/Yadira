@@ -2753,8 +2753,13 @@ function AppContent() {
       {clubGame === 'pairs' && (
         <MemoryPairs
           onExit={() => setClubGame(null)}
-          // Their own album, so a match is a memory rather than a shape.
-          photos={galleryPhotos.map((p) => p.dataUrl).filter(Boolean)}
+          // Their own album, so a match is a memory rather than a shape —
+          // but only the captioned ones. A caption means a caregiver looked
+          // at that photo and kept it, which is the closest thing to consent
+          // this has. An uncaptioned upload has been seen by nobody.
+          photos={galleryPhotos
+            .filter((p) => p.dataUrl && (p.caption || '').trim())
+            .map((p) => p.dataUrl)}
         />
       )}
       {clubGame === 'simon' && <HattiesTune onExit={() => setClubGame(null)} />}
