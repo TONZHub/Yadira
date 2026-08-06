@@ -18,7 +18,7 @@ import { detectLucidity, lucidityGuidance, type LucidityKind } from './lucidity'
 import { looksLikeSilence, cleanTranscript } from './transcription';
 import { isDevRequest, devModeAvailable, DEV_MODE_NOTE } from './devMode';
 import { checkAiBudget, type BudgetTier } from './aiBudget';
-import { knownPremium } from './premiumRegistry';
+import { knownPremium, isTrialing } from './premiumRegistry';
 import {
   TRANSCRIBE_WITH_TONE_PROMPT,
   TONE_ONLY_PROMPT,
@@ -427,6 +427,18 @@ app.post('/api/calls/briefing', async (req, res) => {
   if (req.body?.isPremium !== true) {
     return res.status(402).json({
       error: 'Yadira calling you with the week is part of Caregiver Pro.',
+    });
+  }
+  // Not part of the free trial, and enforced HERE rather than only in the UI.
+  // Every briefing call is a real, billed CALL-E call, which makes it the one
+  // premium feature a trial could actually be farmed for. The weekly email
+  // stays available throughout the trial — it costs a fraction of a cent and
+  // a trial where nothing ever arrives is not a trial.
+  if (isTrialing(circle)) {
+    return res.status(402).json({
+      error:
+        'Yadira calling you with the week starts when your trial does. The weekly email is on already — check your inbox.',
+      trial: true,
     });
   }
   if (withinBriefingCooldown(circle)) {

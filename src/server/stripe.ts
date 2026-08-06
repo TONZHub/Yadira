@@ -17,7 +17,7 @@
 // Optional APP_URL overrides the redirect base (defaults to request origin).
 
 import express from 'express';
-import { PLANS, planOf } from '../lib/pricing';
+import { PLANS, planOf, TRIAL_DAYS, hasTrial } from '../lib/pricing';
 import { notePremium } from './premiumRegistry';
 
 const STRIPE_API = 'https://api.stripe.com/v1';
@@ -117,6 +117,10 @@ function subscriptionState(sub: any) {
   const active = status === 'active' || status === 'trialing' || status === 'past_due';
   return {
     active,
+    // Surfaced separately, not folded into `active`. Trialing IS premium —
+    // but the briefing call is billed per call and is deliberately not part
+    // of a trial, so something downstream has to be able to tell them apart.
+    trialing: status === 'trialing',
     status,
     subscriptionId: sub?.id || null,
     customerId: typeof sub?.customer === 'string' ? sub.customer : sub?.customer?.id || null,
@@ -167,6 +171,11 @@ export function registerStripeRoutes(app: express.Express) {
       'metadata[circleId]': circle,
       'subscription_data[metadata][circleId]': circle,
       allow_promotion_codes: 'true',
+      // Stripe collects the card now and charges when the trial ends. A
+      // card-required trial converts several times better than a no-card one,
+      // and without it the circle id IS the account uid — a new signup would
+      // be a new trial, forever, with nothing to track it by.
+      ...(hasTrial() ? { 'subscription_data[trial_period_days]': String(TRIAL_DAYS) } : {}),
       ...(accountEmail && accountEmail.includes('@') && !accountEmail.endsWith('@yadira.local')
         ? { customer_email: accountEmail }
         : {}),
@@ -209,7 +218,7 @@ export function registerStripeRoutes(app: express.Express) {
       const state = subscriptionState(session.subscription);
       // Tell the budget middleware what Stripe just confirmed, so a caregiver
       // who has this second paid for Pro is not held to the free ceiling.
-      notePremium(String(session.metadata?.circleId || ''), paid && state.active);
+      notePremium(String(session.metadata?.circleId || ''), paid && state.active, state.trialing);
       res.json({
         active: paid && state.active,
         circleId: session.metadata?.circleId || null,
@@ -233,7 +242,7 @@ export function registerStripeRoutes(app: express.Express) {
     try {
       const sub = await stripeRequest('GET', `/subscriptions/${subscriptionId}`);
       const state = subscriptionState(sub);
-      notePremium(String(sub?.metadata?.circleId || req.query?.circle || ''), state.active);
+      notePremium(String(sub?.metadata?.circleId || req.query?.circle || ''), state.active, state.trialing);
       res.json(state);
     } catch (err: any) {
       if (isMissingResource(err)) {
@@ -288,7 +297,7 @@ export function registerStripeRoutes(app: express.Express) {
         }).catch(() => {});
       }
 
-      notePremium(circle, subscriptionState(best).active);
+      notePremium(circle, subscriptionState(best).active, subscriptionState(best).trialing);
       res.json({ found: true, ...subscriptionState(best) });
     } catch (err: any) {
       console.error('[Stripe] restore failed:', err.message || err);
