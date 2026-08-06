@@ -18,18 +18,26 @@
 //
 // Identity gate, one sentence, goodbye. That is the whole call.
 //
-// ---- Why it does not say "nothing is wrong" ----
+// ---- Why it offers no reassurance at all ----
 //
-// The help call and the briefing call both open that way, and there it means
-// "no action needed, you can breathe". This call is asking somebody to move.
-// Saying "nothing is wrong" and then "now is the time" is a contradiction in
-// the same breath — and worse, it teaches a caregiver that the phrase can
-// precede urgency. One of the times they stop believing it is the call where
-// it is true.
+// The first version opened "nothing is wrong", which contradicted the "go
+// now" that followed. The second softened it to "she is safe, nobody is
+// hurt". Both were wrong, and the second was worse, because it sounded
+// responsible.
 //
-// So it rules out the EMERGENCY without ruling out the NEWS: "she is safe,
-// and nobody is hurt." Those are different sentences and they must stay
-// different across all three calls.
+// The detector this call fires from is named, in this codebase, the TERMINAL
+// LUCIDITY tripwire. Terminal lucidity is a documented thing: an unexpected
+// window of clarity in the last hours. So the call that says "she is safe"
+// may be saying it on the last afternoon, to the person who will remember
+// every word of it.
+//
+// We do not know whether anything is wrong. We know one fact — she is clear
+// right now — so the call is that fact and nothing else.
+//
+// Getting straight to it also solves the problem the reassurance was there
+// for. This number rings for the help button, so the caregiver answers
+// braced; hearing what this actually is inside three seconds settles that
+// faster than a claim would, and it has the advantage of being true.
 //
 // ---- The one thing it must not do ----
 //
@@ -72,11 +80,11 @@ export function buildLucidityCallGoal(req: LucidityCallRequest): string {
     '',
     `2. If they say no, or you are not certain it is ${who}: say "Sorry to have troubled you," and end the call. Do NOT say why you are calling. Do NOT name ${them}. Do NOT mention health, memory, clarity, or an app. Do NOT ask them to pass on a message. Whoever answered learns only that somebody called.`,
     '',
-    `3. The moment you know it is ${who}, take the fear off the table FIRST: "${them} is safe, and nobody is hurt." This number also rings for ${them}'s help button, so ${who} may have answered braced for bad news.`,
+    `3. The moment you know it is ${who}, say the thing you called to say. No preamble, no reassurance, no asking how they are: "${them} is having a very clear moment right now. Those don't usually last long — so if you are able to be with them, or to call them, now would be the time."`,
     '',
-    `4. Do NOT say "nothing is wrong". That is what the help-button call and the weekly update call say to mean "no action needed, you can breathe". This call is asking them to move. If "nothing is wrong" starts arriving before urgency, ${who} learns not to believe it — and one of the times they stop believing it is the call where it is true. Rule out the EMERGENCY, not the NEWS.`,
+    `4. Do NOT say "nothing is wrong". Do NOT say ${them} is safe, is fine, or that nobody is hurt. You do not know that. A sudden clear window can be the last one, and a caregiver told "she is safe" on that afternoon has been lied to about the only thing they would never forgive. You know ONE thing — that they are clear right now — and that is the entire call.`,
     '',
-    `5. Then the news, in one or two sentences: "${them} is having a very clear moment right now. Those don't usually last long — so if you are able to be with them, or to call them, now would be the time."`,
+    `5. Getting straight to it is also the kindest thing you can do here. This number rings for ${them}'s help button too, so ${who} answered braced. Hearing what this actually is inside three seconds settles that faster than any reassurance would, and it has the advantage of being true.`,
     '',
     `6. Say it is happening NOW and do not say how long it will last. Never say "${them} will be waiting", "you have time", or anything that promises the window is still open when they arrive. Nobody knows how long a clear period runs, and a caregiver who drives across town on a promise and finds it has passed has been handed a second loss by the call that told them.`,
     '',

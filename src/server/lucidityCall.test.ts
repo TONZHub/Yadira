@@ -31,7 +31,7 @@ const goal = buildLucidityCallGoal(req);
 describe('it says nothing until it knows who answered', () => {
   test('identity is confirmed before Eleanor is named', () => {
     const ask = goal.indexOf('Am I speaking with');
-    const name = goal.indexOf('Eleanor is safe');
+    const name = goal.indexOf('very clear moment right now');
     assert.ok(ask > -1 && ask < name);
   });
 
@@ -95,28 +95,30 @@ describe('it is not a doctor and it is not alarming', () => {
     assert.match(goal, /Say nothing about their prognosis/i);
   });
 
-  test('the fear comes off the table first, because this number also rings for the help button', () => {
-    assert.match(goal, /Eleanor is safe, and nobody is hurt/);
-    assert.match(goal, /also rings for Eleanor's help button/);
-    assert.match(goal, /braced for bad news/i);
-    assert.match(goal, /Do not sound alarmed/i);
+  test('it promises NOTHING about whether anything is wrong', () => {
+    // The detector this fires from is named, in this codebase, the TERMINAL
+    // LUCIDITY tripwire. Terminal lucidity is a documented phenomenon: an
+    // unexpected window of clarity in the last hours. A call that says "she
+    // is safe" may be saying it on the last afternoon, to the person who
+    // will remember every word of it.
+    //
+    // We know one fact. The call is that fact.
+    assert.match(goal, /Do NOT say "nothing is wrong"/);
+    assert.match(goal, /Do NOT say Eleanor is safe, is fine, or that nobody is hurt/);
+    assert.match(goal, /You do not know that/);
+    assert.match(goal, /can be the last one/i);
   });
 
-  test('it does NOT say "nothing is wrong", and knows why', () => {
-    // The help call and the briefing call both open with that phrase, where
-    // it means "no action needed, you can breathe". This call is asking
-    // somebody to move. Saying it and then "now is the time" is a
-    // contradiction in the same breath — and it teaches a caregiver that the
-    // phrase can precede urgency. One of the times they stop believing it is
-    // the call where it is true.
-    //
-    // The reassurance still has to come first; it just has to rule out the
-    // EMERGENCY without ruling out the NEWS.
-    const reassurance = goal.indexOf('Eleanor is safe, and nobody is hurt');
-    const news = goal.indexOf('very clear moment right now');
-    assert.ok(reassurance > -1 && reassurance < news, 'safety must precede the news');
-    assert.match(goal, /Do NOT say "nothing is wrong"/);
-    assert.match(goal, /Rule out the EMERGENCY, not the NEWS/);
+  test('it opens with the news itself, not a preamble', () => {
+    // Getting straight to it is what replaced the reassurance, and it does
+    // the same job better: this number rings for the help button, so the
+    // caregiver answered braced, and hearing what this actually is inside
+    // three seconds settles that faster than a claim would.
+    assert.match(goal, /No preamble, no reassurance, no asking how they are/);
+    assert.match(goal, /rings for Eleanor's help button/);
+    assert.match(goal, /inside three seconds/i);
+    assert.match(goal, /advantage of being true/i);
+    assert.match(goal, /Do not sound alarmed/i);
   });
 
   test('works without a caregiver name', () => {
