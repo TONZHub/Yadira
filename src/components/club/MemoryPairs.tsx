@@ -2,6 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import SensoryExit from '../sensory/SensoryExit';
 import { Hattie } from '../Hattie';
 import { delightLine } from '../../lib/hattieClub';
+import hattieCalm from '../../assets/hattie/hattie-calm.webp';
+import hattieCampfire from '../../assets/hattie/hattie-campfire.webp';
+import hattieLantern from '../../assets/hattie/hattie-lantern.webp';
+import hattieReading from '../../assets/hattie/hattie-reading.webp';
+import hattieReady from '../../assets/hattie/hattie-ready.webp';
+import hattieThinking from '../../assets/hattie/hattie-thinking.webp';
 
 // Matching Pairs — the one that is reminiscence rather than a test.
 //
@@ -23,7 +29,9 @@ import { delightLine } from '../../lib/hattieClub';
 // back over and that is all that happens. The board simply finishes, and
 // finishing is the only outcome it has.
 
-const FALLBACK = ['🌻', '🐦', '🍎', '🌙', '🐝', '🌲', '🫖', '🕊️'];
+// Exactly six fallback images — one per pair — so the deal always produces
+// exactly two copies of each face when no family photos are available.
+const FALLBACK = [hattieCalm, hattieCampfire, hattieLantern, hattieReading, hattieReady, hattieThinking];
 const PAIRS = 6;
 
 interface Card {
@@ -131,7 +139,6 @@ export default function MemoryPairs({
               }}
             >
               {showing ? (
-                card.isPhoto ? (
                   <img
                     src={card.face}
                     alt=""
@@ -142,9 +149,6 @@ export default function MemoryPairs({
                     // shows these whole; the game should not zoom them.
                     className="w-full h-full object-contain p-1"
                   />
-                ) : (
-                  <span className="text-4xl">{card.face}</span>
-                )
               ) : (
                 <span className="text-2xl opacity-30" aria-hidden="true">🌿</span>
               )}
