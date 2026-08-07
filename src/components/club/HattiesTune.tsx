@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import SensoryExit from '../sensory/SensoryExit';
+import { Hattie } from '../Hattie';
 import { restartLine } from '../../lib/hattieClub';
 
 // Hattie's Tune — Simon, with the test taken out.
@@ -146,7 +147,7 @@ export default function HattiesTune({ onExit }: { onExit: () => void }) {
 
       {saying && (
         <div className="mt-5 flex items-center gap-2.5 px-5 py-3 rounded-2xl bg-[#1E2740] border border-[#8FA3E0]/40">
-          <span className="text-2xl" aria-hidden="true">🦛</span>
+          <Hattie size={34} pose="calm" />
           <span className="text-[#D6DEF5] text-sm">{saying}</span>
         </div>
       )}

@@ -65,6 +65,7 @@ import { DEMO_MEMORIES, DEMO_FAQS, DEMO_LOGS, DEMO_ROUTINE } from './lib/demoDat
 import { playMemorySoundscape } from './lib/soundscapes';
 import { ChatMessageSkeleton, MemorySkeleton, RoutineSkeleton, LogSkeleton } from './components/LoadingSkeletons';
 import LodgeScreen from './lodge/LodgeScreen';
+import { Hattie } from './components/Hattie';
 
 // Realistic pre-populated clinical logs for a high-fidelity starting state (caregiver charts look populated immediately)
 
@@ -2549,10 +2550,10 @@ function AppContent() {
             <button
               id="btn-hatties-club"
               onClick={() => setShowClubMenu(true)}
-              className="p-2 sm:p-2.5 rounded-xl border border-[#E3DFC2] bg-white text-[#A6A27B] hover:text-[#3A5D45] hover:border-[#CEDFCF] transition-all text-lg leading-none"
+              className="p-1.5 sm:p-2 rounded-xl border border-[#E3DFC2] bg-white hover:border-[#CEDFCF] transition-all leading-none"
               title="Hattie's Club — a few games, nothing to lose"
             >
-              <span aria-hidden="true">🦛</span>
+              <Hattie size={24} pose="waving" animated={false} />
             </button>
           )}
 

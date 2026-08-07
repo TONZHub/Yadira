@@ -2,6 +2,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { X } from 'lucide-react';
 import { CLUB_GAMES, type GameId } from '../../lib/hattieClub';
+import { Hattie } from '../Hattie';
 
 // Hattie's Club — the picker.
 //
@@ -34,7 +35,7 @@ export default function ClubMenu({
         <div className="px-6 py-4 border-b border-[#E3DFC2] flex items-center justify-between shrink-0">
           <div>
             <h3 className="text-xl font-bold text-[#2C2C2A] flex items-center gap-2">
-              <span aria-hidden="true">🦛</span> Hattie&rsquo;s Club
+              <Hattie size={30} pose="waving" /> Hattie&rsquo;s Club
             </h3>
             <p className="text-xs text-[#7E7D76] mt-0.5">
               Nothing to win, nothing to lose. Hattie deals again when you want.

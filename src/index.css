@@ -148,6 +148,14 @@ svg {
    OS asks for it. The JS-driven ambient blobs are gated in App.tsx via
    useReducedMotion(). Constant motion can dysregulate a dementia patient,
    so this is clinical as much as it is accessibility. */
+/* Hattie's idle. Breathing, not bouncing — she should feel present, not
+   demanding. The reduced-motion block below stops it globally, which is the
+   right behaviour: constant motion can dysregulate a dementia patient. */
+@keyframes hattie-breathe{
+  0%,100%{ transform:translateY(0) scale(1); }
+  50%{ transform:translateY(-1.5%) scale(1.015); }
+}
+
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{
     animation-duration:0.001ms !important;

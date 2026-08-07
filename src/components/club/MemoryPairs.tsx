@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import SensoryExit from '../sensory/SensoryExit';
+import { Hattie } from '../Hattie';
 import { delightLine } from '../../lib/hattieClub';
 
 // Matching Pairs — the one that is reminiscence rather than a test.
@@ -158,12 +159,12 @@ export default function MemoryPairs({
           onClick={() => setCards(deal(photos))}
           className="mt-5 px-6 py-3 rounded-2xl bg-[#264A34] border border-[#8FD5A8]/40 text-[#D6F0DF] text-sm font-bold active:scale-95"
         >
-          🦛 Shall we do another?
+          <Hattie size={22} pose="reading" className="inline-block align-middle mr-1.5" /> Shall we do another?
         </button>
       ) : (
         saying && (
           <div className="mt-5 flex items-center gap-2.5 px-5 py-3 rounded-2xl bg-[#264A34] border border-[#8FD5A8]/40">
-            <span className="text-2xl" aria-hidden="true">🦛</span>
+            <Hattie size={34} pose="reading" />
             <span className="text-[#D6F0DF] text-sm">{saying}</span>
           </div>
         )
