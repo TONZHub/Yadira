@@ -31,7 +31,7 @@ const goal = buildLucidityCallGoal(req);
 describe('it says nothing until it knows who answered', () => {
   test('identity is confirmed before Eleanor is named', () => {
     const ask = goal.indexOf('Am I speaking with');
-    const name = goal.indexOf('Nothing is wrong');
+    const name = goal.indexOf('very clear moment right now');
     assert.ok(ask > -1 && ask < name);
   });
 
@@ -53,7 +53,11 @@ describe('it says nothing until it knows who answered', () => {
 describe('it does not promise the window will last', () => {
   test('the news is anchored to now', () => {
     assert.match(goal, /clear moment right now/i);
-    assert.match(goal, /now is the time/i);
+    // "would be the time", not "is the time". This call asks nothing and
+    // instructs nothing — it hands over a fact and gets off the phone. The
+    // conditional is doing that work.
+    assert.match(goal, /now would be the time/i);
+    assert.match(goal, /don't usually last long/i);
   });
 
   test('and it is explicitly forbidden from promising more', () => {
@@ -91,9 +95,29 @@ describe('it is not a doctor and it is not alarming', () => {
     assert.match(goal, /Say nothing about their prognosis/i);
   });
 
-  test('nothing is wrong is said first, because this number also rings for the help button', () => {
-    assert.match(goal, /also rings for Eleanor's help button/);
-    assert.match(goal, /braced for bad news/i);
+  test('it promises NOTHING about whether anything is wrong', () => {
+    // The detector this fires from is named, in this codebase, the TERMINAL
+    // LUCIDITY tripwire. Terminal lucidity is a documented phenomenon: an
+    // unexpected window of clarity in the last hours. A call that says "she
+    // is safe" may be saying it on the last afternoon, to the person who
+    // will remember every word of it.
+    //
+    // We know one fact. The call is that fact.
+    assert.match(goal, /Do NOT say "nothing is wrong"/);
+    assert.match(goal, /Do NOT say Eleanor is safe, is fine, or that nobody is hurt/);
+    assert.match(goal, /You do not know that/);
+    assert.match(goal, /can be the last one/i);
+  });
+
+  test('it opens with the news itself, not a preamble', () => {
+    // Getting straight to it is what replaced the reassurance, and it does
+    // the same job better: this number rings for the help button, so the
+    // caregiver answered braced, and hearing what this actually is inside
+    // three seconds settles that faster than a claim would.
+    assert.match(goal, /No preamble, no reassurance, no asking how they are/);
+    assert.match(goal, /rings for Eleanor's help button/);
+    assert.match(goal, /inside three seconds/i);
+    assert.match(goal, /advantage of being true/i);
     assert.match(goal, /Do not sound alarmed/i);
   });
 
