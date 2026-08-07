@@ -171,3 +171,38 @@ describe('at most one digest a week, without a scheduler existing', () => {
     assert.equal(weekKey(new Date('2026-08-05T23:00:00Z').getTime()), monday);
   });
 });
+
+describe('the in-memory week is a backstop, not the gate', () => {
+  // Reported from production: the digest arrived on EVERY LOGIN.
+  //
+  // `sentWeeks` is a Map in this process. Render spins the free tier down
+  // after inactivity, so a caregiver logging in once a day hit a cold server
+  // every time, found an empty Map, and got the email again. "Once per ISO
+  // week" was only ever true within one process lifetime.
+  //
+  // The real gate now lives in aiUsage — localStorage plus Firestore, per
+  // circle — which survives both a restart and a new device. What is asserted
+  // here is the property that made the old design wrong.
+
+  test('a restart forgets everything it knew', () => {
+    __resetWeeklySent(); // stands in for the process dying
+    markWeeklySent('circle-a', at);
+    assert.equal(alreadySentThisWeek('circle-a', at), true);
+
+    __resetWeeklySent(); // ...and coming back up
+    assert.equal(
+      alreadySentThisWeek('circle-a', at),
+      false,
+      'in-memory state cannot be the only thing standing between a family and a duplicate email'
+    );
+  });
+
+  test('weekKey is stable across processes, which is why the client can use it', () => {
+    // The durable gate stores a timestamp and compares ISO weeks. That only
+    // works if this function is a pure function of the clock.
+    const a = weekKey(at);
+    const b = weekKey(at);
+    assert.equal(a, b);
+    assert.match(a, /^\d{4}-W\d{2}$/);
+  });
+});
