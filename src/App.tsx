@@ -45,6 +45,7 @@ import type { Message, Memory, CustomFAQ, DailyLog, RoutineItem, PersonaFile, Se
 import { DEFAULT_PROFILE, DEFAULT_PERSONA_FILE } from './types';
 import { useStoreList, useStoreDoc } from './lib/useStore';
 import { PRICE_SHORT, planOf, TRIAL_LABEL, type Plan } from './lib/pricing';
+import { weekKey } from './server/briefingEmail';
 import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
@@ -593,7 +594,7 @@ function AppContent() {
     female: 'zippy-pecan-9151__design-voice-6cd2e59a',
     male: 'zippy-pecan-9151__design-voice-87c0a467',
   };
-  const [aiUsage, setAiUsage] = useStoreDoc<{ lastInsightsAt?: number; lastRoutineAt?: number; caregiverChatCount?: number }>('aiUsage', {});
+  const [aiUsage, setAiUsage] = useStoreDoc<{ lastInsightsAt?: number; lastRoutineAt?: number; caregiverChatCount?: number; lastBriefingEmailAt?: number }>('aiUsage', {});
 
   // ---- Ask Yadira: the caregiver's co-pilot chat (Caregiver Pro tooling) ----
   const CAREGIVER_CHAT_FREE_LIMIT = 5;
@@ -2314,6 +2315,22 @@ function AppContent() {
   // inbox waits, so a digest that arrives when the caregiver next opens the
   // app is still a weekly digest. `auto` lets the server enforce one a week.
   const sendBriefingEmail = async (auto: boolean) => {
+    // The weekly gate lives HERE, not on the server.
+    //
+    // It used to be an in-memory Map in briefingEmail.ts, which made "once a
+    // week" true only within one process lifetime. Render spins the free tier
+    // down after inactivity, so a caregiver logging in once a day hit a cold
+    // server every time, found an empty Map, and got the digest on EVERY
+    // LOGIN. Reported exactly that way.
+    //
+    // aiUsage is a useStoreDoc — localStorage plus Firestore, per circle —
+    // which is where the other weekly limits already live, and it survives
+    // both a restart and a new device. The server keeps its own check as a
+    // backstop; it just can no longer be the only one.
+    if (auto) {
+      const last = aiUsage.lastBriefingEmailAt;
+      if (last && weekKey(last) === weekKey(Date.now())) return;
+    }
     try {
       const res = await apiCall('/api/email/briefing', {
         method: 'POST',
@@ -2328,6 +2345,11 @@ function AppContent() {
         }),
       });
       const data = await res.json();
+      // Only a real send consumes the week. A 503 because RESEND_API_KEY is
+      // unset, or a 502 from Resend, must not cost the family their digest.
+      if (res.ok && !data.skipped) {
+        setAiUsage({ ...aiUsage, lastBriefingEmailAt: Date.now() });
+      }
       if (!auto) {
         if (res.ok && !data.skipped) toastSuccess('Sent', 'The week is in your inbox.');
         else if (!res.ok) toastError('Could not send', data.error || 'Please try again.');
@@ -2343,8 +2365,15 @@ function AppContent() {
     if (isPatientSession || !isPremium) return;
     const t = setTimeout(() => sendBriefingEmail(true), 4000);
     return () => clearTimeout(t);
+    // lastBriefingEmailAt is a dependency on purpose. The timer captures
+    // sendBriefingEmail from the render the effect ran on, and aiUsage may
+    // still have been empty then — it loads from localStorage synchronously
+    // but from Firestore async, so on a NEW device the first render has
+    // nothing. Re-running when it arrives means the guard sees the real
+    // value; when we then set it, the effect re-runs once more and returns
+    // immediately, which costs nothing.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isPatientSession, isPremium]);
+  }, [isPatientSession, isPremium, aiUsage.lastBriefingEmailAt]);
 
   // ---- Ask Yadira, by phone ----
   // The dashboard is only usable by someone sitting at it. This is the same
