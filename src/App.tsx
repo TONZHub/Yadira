@@ -2420,6 +2420,9 @@ function AppContent() {
         toastError('Could not place the call', data.error || 'Please try again.');
         return;
       }
+      // Dispatch, not outcome. The server no longer waits for the call to
+      // finish, so this says the call is on its way; how it went arrives in
+      // the help-status card, which survives a refresh.
       toastSuccess('Yadira is calling you', data.summary || 'Your phone should ring in a moment.');
     } catch {
       toastError('Could not place the call', 'Could not reach the server.');
