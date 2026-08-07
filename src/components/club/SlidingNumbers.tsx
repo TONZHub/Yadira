@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import SensoryExit from '../sensory/SensoryExit';
+import { Hattie } from '../Hattie';
 import { restartLine } from '../../lib/hattieClub';
 import { newGame, move, addTile, isStuck, type Board, type Direction } from '../../lib/games/tiles';
 
@@ -110,7 +111,7 @@ export default function SlidingNumbers({ onExit }: { onExit: () => void }) {
           not need dismissing, and it never says what went wrong. */}
       {saying && (
         <div className="mt-5 flex items-center gap-2.5 px-5 py-3 rounded-2xl bg-[#3B3324] border border-[#C8A96A]/40">
-          <span className="text-2xl" aria-hidden="true">🦛</span>
+          <Hattie size={34} pose="calm" />
           <span className="text-[#E8DCC0] text-sm">{saying}</span>
         </div>
       )}
