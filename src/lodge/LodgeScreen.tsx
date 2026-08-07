@@ -18,6 +18,9 @@ import { Send, Loader, Sparkles, Volume2, VolumeX } from 'lucide-react';
 import { PRICE_SHORT } from '../lib/pricing';
 import type { CaregiverCheckIn, HattieMessage } from '../types';
 import { Hattie } from '../components/Hattie';
+// The armchair Hattie is for the LARGE placements only. She sits small
+// inside a big chair, so at the 34px chat-avatar size the whole thing
+// collapses into a smudge — those keep the head-and-shoulders default.
 import Hearth from './Hearth';
 import { useStoreList, useStoreDoc } from '../lib/useStore';
 import { startCampfireAmbience, type CampfireHandle } from '../lib/campSounds';
@@ -214,7 +217,7 @@ export const LodgeScreen: React.FC<LodgeScreenProps> = ({
     return (
       <div className="rounded-3xl border border-[#E3DFC2] shadow-sm overflow-hidden bg-gradient-to-b from-[#3B3128] to-[#241E18] text-center px-6 py-12 sm:py-16">
         <div className="mx-auto max-w-md flex flex-col items-center">
-          <Hattie size={116} />
+          <Hattie size={116} pose="armchair" />
           <h2 className="mt-4 font-serif text-2xl sm:text-3xl text-[#F3EBDD] font-bold">Hattie's Lodge</h2>
           <p className="mt-3 text-[#D8CDBB] leading-relaxed">
             Up the hill from {patientName ? `${patientName}'s` : 'the'} camp there's a lodge with a
@@ -249,7 +252,7 @@ export const LodgeScreen: React.FC<LodgeScreenProps> = ({
         <p className="text-xs font-bold uppercase tracking-[0.22em] text-[#C8A96A]">🛖 Hattie's Lodge</p>
         <div className="mt-4 flex items-end justify-center gap-1 sm:gap-3">
           <motion.div initial={{ y: 8, opacity: 0 }} animate={{ y: 0, opacity: 1 }} transition={{ type: 'spring', stiffness: 120, damping: 14 }}>
-            <Hattie size={104} />
+            <Hattie size={104} pose="armchair" />
           </motion.div>
           <Hearth streak={streak} width={190} />
         </div>

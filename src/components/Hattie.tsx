@@ -28,6 +28,7 @@
 // crisp on a retina tablet without carrying pixels nobody sees.
 
 import React from 'react';
+import armchair from '../assets/hattie/hattie-armchair.webp';
 import calm from '../assets/hattie/hattie-calm.webp';
 import campfire from '../assets/hattie/hattie-campfire.webp';
 import lantern from '../assets/hattie/hattie-lantern.webp';
@@ -37,6 +38,7 @@ import thinking from '../assets/hattie/hattie-thinking.webp';
 import waving from '../assets/hattie/hattie-waving.webp';
 
 export type HattiePose =
+  | 'armchair'
   | 'calm'
   | 'campfire'
   | 'lantern'
@@ -46,6 +48,7 @@ export type HattiePose =
   | 'waving';
 
 const POSES: Record<HattiePose, string> = {
+  armchair,
   calm,
   campfire,
   lantern,

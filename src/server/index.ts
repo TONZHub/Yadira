@@ -448,7 +448,10 @@ app.post('/api/calls/test', async (req, res) => {
   lastTestCallAt.set(circle, Date.now());
 
   try {
-    const result = await placeHelpCall(
+    // Dispatched, not awaited — same reason as the briefing call. This one
+    // polled for four minutes, which is four minutes of a caregiver watching
+    // a spinner and being told the server is unreachable if they navigate.
+    void placeHelpCall(
       {
         toPhone,
         patientName: String(req.body?.patientName || 'your loved one'),
@@ -457,13 +460,18 @@ app.post('/api/calls/test', async (req, res) => {
         region: req.body?.region ? String(req.body.region) : undefined,
       },
       { test: true }
-    );
-    recordOutcome(circle, 'placed', `Test call — ${result.summary}`);
-    res.json({ ok: true, ...result });
+    )
+      .then((result) => recordOutcome(circle, 'placed', `Test call — ${result.summary}`))
+      .catch((err: any) => {
+        const detail = String(err?.message || err).slice(0, 200);
+        recordOutcome(circle, 'failed', `Test call could not be placed: ${detail}`);
+        console.warn('[Yadira CALL-E] test call failed:', detail);
+      });
+
+    res.json({ ok: true, dispatched: true, summary: 'Sending it now — your phone should ring in a moment.' });
   } catch (err: any) {
     const detail = String(err?.message || err).slice(0, 200);
-    recordOutcome(circle, 'failed', `Test call could not be placed: ${detail}`);
-    console.warn('[Yadira CALL-E] test call failed:', detail);
+    console.warn('[Yadira CALL-E] test dispatch failed:', detail);
     res.status(502).json({ error: detail });
   }
 });
@@ -507,22 +515,38 @@ app.post('/api/calls/briefing', async (req, res) => {
   markBriefed(circle);
 
   try {
-    const briefing = String(req.body?.briefing || '').trim();
-    const result = await placeBriefingCall({
+    // Dispatched, not awaited.
+    //
+    // This used to hold the HTTP request open for the whole call — up to ten
+    // minutes of polling. Refresh the page mid-call and the browser aborts
+    // the fetch, which the client can only report as "could not reach the
+    // server". That is exactly what happened in testing, and the call itself
+    // was fine. Render also kills long requests, and a button has no business
+    // spinning for the length of a phone conversation.
+    //
+    // The outcome lands in /api/calls/help-status, which the hub already
+    // polls, so it survives a refresh instead of being lost with the socket.
+    void placeBriefingCall({
       toPhone,
       patientName: String(req.body?.patientName || 'your loved one'),
       caregiverName: req.body?.caregiverName ? String(req.body.caregiverName) : undefined,
-      briefing,
+      briefing: String(req.body?.briefing || '').trim(),
       region: req.body?.region ? String(req.body.region) : undefined,
       at: Date.now(),
-    });
-    recordOutcome(circle, 'placed', `Briefing call — ${result.summary}`);
-    res.json({ ok: true, ...result });
+    })
+      .then((result) => recordOutcome(circle, 'placed', `Briefing call — ${result.summary}`))
+      .catch((err: any) => {
+        clearBriefingCooldown(circle);
+        const detail = String(err?.message || err).slice(0, 200);
+        recordOutcome(circle, 'failed', `Briefing call could not be placed: ${detail}`);
+        console.warn('[Yadira CALL-E] briefing call failed:', detail);
+      });
+
+    res.json({ ok: true, dispatched: true, summary: 'Calling you now — your phone should ring in a moment.' });
   } catch (err: any) {
     clearBriefingCooldown(circle);
     const detail = String(err?.message || err).slice(0, 200);
-    recordOutcome(circle, 'failed', `Briefing call could not be placed: ${detail}`);
-    console.warn('[Yadira CALL-E] briefing call failed:', detail);
+    console.warn('[Yadira CALL-E] briefing dispatch failed:', detail);
     res.status(502).json({ error: detail });
   }
 });
