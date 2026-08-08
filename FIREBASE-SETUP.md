@@ -88,6 +88,31 @@ service cloud.firestore {
     match /careCircles/default-circle/{document=**} {
       allow read, write: if true;
     }
+
+    // Referral codes — see "Referral links" below for why the read is open to
+    // every signed-in account and why a stranger may touch one field here.
+    match /referrals/{uid} {
+      allow read: if request.auth != null;
+      allow create, update: if request.auth != null && request.auth.uid == uid;
+      // The referred account ticks its referrer's counter — one field, by
+      // exactly one, and only once it has written its own signup record
+      // naming that referrer.
+      allow update: if request.auth != null
+        && request.auth.uid != uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['signupsFromCode'])
+        && request.resource.data.signupsFromCode == resource.data.signupsFromCode + 1
+        && get(/databases/$(database)/documents/referralSignups/$(request.auth.uid)).data.referrerUid == uid;
+      allow delete: if false;
+    }
+
+    // Who arrived on whose link. Written once, by the account it describes,
+    // and never rewritten — an attribution must not be able to change hands.
+    match /referralSignups/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.referrerUid != uid;
+      allow update, delete: if false;
+    }
   }
 }
 ```
@@ -97,6 +122,54 @@ Patient" without a signed-in caregiver) are not Firebase-authenticated, so
 under these rules their cloud sync silently stays off and they run on
 localStorage only. That's the correct trade: paying families are isolated
 and authenticated; the demo still works.
+
+### Referral links
+
+Every signed-in caregiver gets a permanent code on first login
+(`YADIRA-X7K2`) and a link carrying it — `https://yadira.chat/?ref=CODE`.
+Someone who opens that link and creates an account is written down as theirs.
+The code is implemented in `src/lib/referral.ts` (Firestore) and
+`src/lib/referralCode.ts` (the pure parts, which are tested).
+
+Two collections, both deliberately OUTSIDE `careCircles/`. A referral is a
+relationship between two families, so it cannot live inside either one's
+private circle:
+
+```
+referrals/{uid}
+  code            "YADIRA-X7K2"   permanent, never reissued
+  createdAt       timestamp
+  signupsFromCode number          accounts this code brought in
+
+referralSignups/{newUserUid}
+  referredBy      "YADIRA-X7K2"
+  referrerUid     uid of whoever owns that code
+  createdAt       timestamp
+```
+
+Two things about the rules above are worth understanding before you paste
+them, because the obvious version of each is wrong:
+
+- **`referrals` is readable by every signed-in account.** It has to be:
+  minting a code checks the collection for a collision, and redeeming one
+  looks up the owner by code. What is exposed is a uid and a code — no
+  names, no patient data, nothing from a care circle.
+- **A stranger can write to your `referrals` doc.** Also unavoidable: the
+  counter is incremented by the person who was referred, not by you, and a
+  plain `request.auth.uid == uid` rule (the intuitive one) silently fails
+  every increment — signups get recorded while the count sits at zero. The
+  rule instead pins the write down to a single field, changing by exactly
+  one, from an account that has already written a signup record naming you.
+
+That last rule is tight but not a ledger: a determined signed-in user could
+still call it repeatedly and inflate one count. `referralSignups` is the
+authoritative record — it can be created once per account and never edited —
+so if a number ever looks wrong, count the documents there. Making the
+counter itself unforgeable needs a Cloud Function owning the write, which is
+worth doing if referrals ever gate something valuable.
+
+To see totals at any time: Firestore console → `referrals` → sort by
+`signupsFromCode`.
 
 ### Setting up the patient's device
 

@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, getAdditionalUserInfo, Auth } from 'firebase/auth';
 import { auth, isFirebaseConfigured } from './firebase';
 import { isUnlinkedPatientCircle, localUid, parseJwtPayload, UNLINKED_PATIENT_EMAIL } from './localSession';
+import { syncReferralForUser } from './referral';
 
 interface AuthContextType {
   user: { uid: string; email: string | null } | null;
@@ -139,6 +140,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Referral bookkeeping, deliberately outside the role branches below and
+      // deliberately not awaited. Every sign-in path lands here — popup,
+      // email, a session resumed on reload — whereas hooking loginWithGoogle
+      // would miss the others and race the session-role marker it sets after
+      // the popup resolves. Nothing about signing in waits on it, and it
+      // cannot fail loudly: see referral.ts.
+      if (firebaseUser) void syncReferralForUser(firebaseUser.uid);
+
       const role = activeSessionRole();
       if (firebaseUser && role) {
         // Firebase user with a live browser session — refresh the token and
