@@ -50,7 +50,7 @@ import { useLargeFont } from './lib/fontScale';
 import { useTheme, THEMES } from './lib/theme';
 import { getCircleId, isFirebaseConfigured } from './lib/firebase';
 import { CALLE_REGIONS } from './server/calleRegions';
-import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, StillWater, ClubMenu, MemoryPairs, HattiesTune, SlidingNumbers, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal, CaregiverTour, tourSeenKey } from './components';
+import { VoiceInput, MediaUpload, EmotionBadge, LoginScreen, AuroraScreen, DigestibleMessage, FamilySetup, ProfileEdit, type ProfileEdits, SensoryRoomsMenu, RainyWindow, AutumnLeaves, ForestCanopy, StillWater, ClubMenu, MemoryPairs, HattiesTune, SlidingNumbers, CallScreen, CampCheckIn, TermsModal, TERMS_VERSION, PhotoAlbum, CloneVoiceModal, CaregiverTour, tourSeenKey } from './components';
 import type { FamilyPackApply } from './components';
 import type { RoomId } from './lib/sensoryRooms';
 import type { GameId } from './lib/hattieClub';
@@ -269,13 +269,24 @@ function AppContent() {
   const mountPatientModeRef = useRef(profile.patientMode);
   const patientMode = modeReady ? profile.patientMode : mountPatientModeRef.current;
   
-  const setPatientName = (v: string) => setProfile({ ...profile, patientName: v });
-  const setPatientStage = (v: string) => setProfile({ ...profile, patientStage: v });
-  const setPatientHobbies = (v: string) => setProfile({ ...profile, patientHobbies: v });
-  const setPatientWakeTime = (v: string) => setProfile({ ...profile, patientWakeTime: v });
-  const setPatientSleepTime = (v: string) => setProfile({ ...profile, patientSleepTime: v });
-  const setCaregiverName = (v: string) => setProfile({ ...profile, caregiverName: v });
-  const setCaregiverRelationship = (v: string) => setProfile({ ...profile, caregiverRelationship: v });
+  /**
+   * The profile fields a caregiver can revise after setup.
+   *
+   * These used to be seven one-field setters — setPatientHobbies and its
+   * siblings — that no UI ever called. The fields could be typed once, in the
+   * setup wizard, and never again: the only way back was Family Setup, which
+   * replaces the whole care circle and takes the memories, logs and routine
+   * with it. Nobody should have to trade their mother's memories to fix her
+   * hobbies, or to move her stage from Moderate to Advanced.
+   *
+   * Merged onto profileRef, not the render's `profile`, so a mode change
+   * arriving from the patient's tablet mid-edit isn't rolled back on save.
+   */
+  const saveProfileEdits = (edits: ProfileEdits) => {
+    setProfile({ ...profileRef.current, ...edits });
+    setShowProfileEdit(false);
+    toastSuccess('Profile updated', 'Regen Routine will rebuild the day around it whenever you like.');
+  };
   const setPatientMode = (v: 'lucid' | 'vivid') => {
     setProfile({ ...profileRef.current, patientMode: v });
     // Same-browser fast path: fires the native `storage` event in any other
@@ -1302,6 +1313,9 @@ function AppContent() {
 
   // Family setup / onboarding modal
   const [showFamilySetup, setShowFamilySetup] = useState(false);
+  // Editing the profile in place — distinct from Family Setup, which replaces
+  // the circle. See saveProfileEdits.
+  const [showProfileEdit, setShowProfileEdit] = useState(false);
 
   // New FAQ State
   const [newFaqQuest, setNewFaqQuest] = useState('');
@@ -3066,6 +3080,19 @@ function AppContent() {
                     <p className="text-xs text-[#8A8981] mt-0.5">
                       Hobbies: <span className="italic">{patientHobbies}</span>
                     </p>
+                    {/* Sits with the values it changes, rather than in Settings
+                        — everything above is displayed here and nowhere else,
+                        so this is where a caregiver looks when one is wrong. */}
+                    <button
+                      type="button"
+                      id="btn-edit-profile"
+                      onClick={() => setShowProfileEdit(true)}
+                      className="mt-2 inline-flex items-center gap-1.5 text-xs font-bold text-[#3A5D45] hover:text-[#2B4633] hover:underline transition-all"
+                      title="Edit name, stage, hobbies, sleep times and your own details"
+                    >
+                      <Sliders className="w-3.5 h-3.5" />
+                      Edit profile
+                    </button>
                   </div>
                 </div>
                 
@@ -3377,6 +3404,14 @@ function AppContent() {
               {/* Add Memory Modal Dialog */}
               {showFamilySetup && (
                 <FamilySetup onClose={() => setShowFamilySetup(false)} onApply={applyFamilyPack} />
+              )}
+
+              {showProfileEdit && (
+                <ProfileEdit
+                  profile={profile}
+                  onSave={saveProfileEdits}
+                  onClose={() => setShowProfileEdit(false)}
+                />
               )}
 
               {showCloneVoice && (
