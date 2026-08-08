@@ -7,6 +7,8 @@ export { default as AuroraScreen } from './AuroraScreen';
 export { default as DigestibleMessage } from './DigestibleMessage';
 export { default as FamilySetup } from './FamilySetup';
 export type { FamilyPackApply } from './FamilySetup';
+export { default as ProfileEdit } from './ProfileEdit';
+export type { ProfileEdits } from './ProfileEdit';
 export { default as SensoryRoomsMenu } from './SensoryRoomsMenu';
 export { default as RainyWindow } from './sensory/RainyWindow';
 export { default as AutumnLeaves } from './sensory/AutumnLeaves';

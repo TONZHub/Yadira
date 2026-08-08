@@ -20,6 +20,7 @@ import {
 } from '../../lib/voices';
 import { CALLE_REGIONS } from '../../server/calleRegions';
 import { THEMES } from '../../lib/theme';
+import ReferralCard from '../ReferralCard';
 import type { CaregiverProfile, CompanionPersonality } from '../../types';
 
 export interface SettingsTabProps {
@@ -685,6 +686,11 @@ const SettingsTab: React.FC<SettingsTabProps> = (props) => {
         </div>
       </div>
     </div>
+
+    {/* The referral link. Last, and quiet: a caregiver comes to this tab to
+        set the number their loved one's help button rings, not to market for
+        us. It renders nothing at all unless there's a real account behind it. */}
+    <ReferralCard />
 
     </div>
   );
